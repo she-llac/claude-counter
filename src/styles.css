@@ -1,0 +1,127 @@
+/* Header: tokens + cache timer */
+.cc-header {
+	margin-top: 2px;
+	user-select: none;
+}
+
+.cc-headerItem {
+	white-space: nowrap;
+}
+
+/* Usage row: session + weekly */
+.cc-usageRow {
+	position: relative;
+	z-index: 50;
+	cursor: pointer;
+	user-select: none;
+	transition: opacity 150ms ease;
+}
+
+.cc-usageRow--dim {
+	opacity: 0.6;
+}
+
+.cc-usageGroup {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex: 1;
+	min-width: 0;
+}
+
+.cc-usageGroup--single {
+	width: 100%;
+}
+
+.cc-usageGroup--weekly {
+	justify-content: flex-end;
+}
+
+.cc-usageText {
+	white-space: nowrap;
+}
+
+/* Bars (mini + usage) */
+.cc-bar {
+	--cc-radius: 3px;
+	--cc-stroke: transparent;
+	--cc-fill: transparent;
+	--cc-fill-warn: var(--cc-fill);
+	--cc-marker: transparent;
+
+	position: relative;
+	box-sizing: border-box;
+	width: 100%;
+	height: 6px;
+	border-radius: var(--cc-radius);
+	border: 1px solid var(--cc-stroke);
+	overflow: visible;
+	user-select: none;
+}
+
+.cc-bar__fill {
+	width: 0%;
+	height: 100%;
+	background: var(--cc-fill);
+	transition: width 300ms ease, background-color 300ms ease;
+	border-top-left-radius: max(0px, calc(var(--cc-radius) - 1px));
+	border-bottom-left-radius: max(0px, calc(var(--cc-radius) - 1px));
+	border-top-right-radius: 0;
+	border-bottom-right-radius: 0;
+}
+
+.cc-bar__fill.cc-full {
+	border-top-right-radius: max(0px, calc(var(--cc-radius) - 1px));
+	border-bottom-right-radius: max(0px, calc(var(--cc-radius) - 1px));
+}
+
+.cc-bar__fill.cc-warn {
+	background: var(--cc-fill-warn);
+}
+
+.cc-bar__marker {
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	left: 0%;
+	width: 2px;
+	background: var(--cc-marker);
+	pointer-events: none;
+}
+
+.cc-bar--mini {
+	width: 60px;
+	height: 7px;
+	--cc-radius: 2px;
+}
+
+.cc-bar--usage {
+	height: 10px;
+	flex: 1;
+}
+
+/* Tooltips */
+.cc-tooltip {
+	position: fixed;
+	z-index: 9999;
+	padding: 4px 8px;
+	border-radius: 4px;
+	font-size: 12px;
+	white-space: pre-line;
+	user-select: none;
+	pointer-events: none;
+	opacity: 0;
+	transition: opacity 200ms ease;
+}
+
+.cc-tooltipTrigger {
+	-webkit-touch-callout: none;
+	-webkit-user-select: none;
+	user-select: none;
+	cursor: help;
+}
+
+/* Hide optional elements completely (no layout space) */
+.cc-hidden {
+	display: none !important;
+}
