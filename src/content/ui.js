@@ -33,6 +33,30 @@
 		return `${days}d ${remHours}h`;
 	}
 
+	function formatResetTime(timestampMs) {
+		if (!timestampMs) return '';
+		
+		const ms = 1000 * 60 * 5; 
+		const roundedDate = new Date(Math.round(timestampMs / ms) * ms);
+
+		const now = new Date();
+		const diffMs = roundedDate.getTime() - now.getTime();
+		const isMoreThanADay = diffMs > 24 * 60 * 60 * 1000;
+
+		if (isMoreThanADay) {
+			return roundedDate.toLocaleDateString([], {
+				weekday: 'short',
+				month: 'short',
+				day: 'numeric'
+			});
+		} else {
+			return roundedDate.toLocaleTimeString([], {
+				hour: 'numeric',
+				minute: '2-digit'
+			});
+		}
+	}
+
 	function setupTooltip(element, tooltip, { topOffset = 10 } = {}) {
 		if (!element || !tooltip) return;
 		if (element.hasAttribute('data-tooltip-setup')) return;
@@ -465,7 +489,7 @@
 				const pct = Math.round(rawPct * 10) / 10;
 				this.sessionResetMs = session.resets_at ? Date.parse(session.resets_at) : null;
 				this.sessionWindowStartMs = this.sessionResetMs ? this.sessionResetMs - 5 * 60 * 60 * 1000 : null;
-				const resetText = this.sessionResetMs ? ` · resets in ${formatResetCountdown(this.sessionResetMs)}` : '';
+				const resetText = this.sessionResetMs ? ` · resets at ${formatResetTime(this.sessionResetMs)}` : '';
 				this.sessionUsageSpan.textContent = `Session: ${pct}%${resetText}`;
 
 				const width = Math.max(0, Math.min(100, rawPct));
@@ -492,7 +516,7 @@
 				const pct = Math.round(rawPct * 10) / 10;
 				this.weeklyResetMs = weekly.resets_at ? Date.parse(weekly.resets_at) : null;
 				this.weeklyWindowStartMs = this.weeklyResetMs ? this.weeklyResetMs - 7 * 24 * 60 * 60 * 1000 : null;
-				const resetText = this.weeklyResetMs ? ` · resets in ${formatResetCountdown(this.weeklyResetMs)}` : '';
+				const resetText = this.weeklyResetMs ? ` · resets ${formatResetTime(this.weeklyResetMs)}` : '';
 				this.weeklyUsageSpan.textContent = `Weekly: ${pct}%${resetText}`;
 
 				const width = Math.max(0, Math.min(100, rawPct));
@@ -554,18 +578,20 @@
 
 			// Reset countdown text + time markers
 			if (this.sessionResetMs && this.sessionUsageSpan?.textContent) {
-				const idx = this.sessionUsageSpan.textContent.indexOf('· resets in');
+				const idx = this.sessionUsageSpan.textContent.indexOf(' · resets');
 				if (idx !== -1) {
-					const prefix = this.sessionUsageSpan.textContent.slice(0, idx + '· resets in '.length);
-					this.sessionUsageSpan.textContent = `${prefix}${formatResetCountdown(this.sessionResetMs)}`;
+					const prefix = this.sessionUsageSpan.textContent.slice(0, idx);
+					this.sessionUsageSpan.textContent = `${prefix} · resets at ${formatResetTime(this.sessionResetMs)}`;
 				}
 			}
 
 			if (this.weeklyResetMs && this.weeklyUsageSpan?.textContent) {
-				const idx = this.weeklyUsageSpan.textContent.indexOf('· resets in');
+				const idx = this.weeklyUsageSpan.textContent.indexOf(' · resets');
 				if (idx !== -1) {
-					const prefix = this.weeklyUsageSpan.textContent.slice(0, idx + '· resets in '.length);
-					this.weeklyUsageSpan.textContent = `${prefix}${formatResetCountdown(this.weeklyResetMs)}`;
+					const prefix = this.weeklyUsageSpan.textContent.slice(0, idx);
+					const timeStr = formatResetTime(this.weeklyResetMs);
+					const separator = (timeStr.includes(':') || timeStr.includes('M')) ? ' at ' : ' ';
+					this.weeklyUsageSpan.textContent = `${prefix} · resets${separator}${timeStr}`;
 				}
 			}
 
