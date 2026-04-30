@@ -289,7 +289,7 @@
 	handleUrlChange();
 
 	function tick() {
-		ui.tick();
+		if (!document.hidden) ui.tick();
 
 		// Refresh usage when a window ends (5h / 7d). SSE won't fire at rollover unless a message is sent.
 		const now = Date.now();
@@ -311,6 +311,22 @@
 			refreshUsage();
 		}
 	}
+
+	// When tab becomes visible again, update the UI immediately and refresh usage
+	// if the tab was hidden long enough that SSE events may have been missed.
+	let hiddenSinceMs = null;
+	document.addEventListener('visibilitychange', () => {
+		if (document.hidden) {
+			hiddenSinceMs = Date.now();
+		} else {
+			ui.tick();
+			const STALE_THRESHOLD_MS = 5 * 60 * 1000;
+			if (hiddenSinceMs !== null && Date.now() - hiddenSinceMs > STALE_THRESHOLD_MS) {
+				refreshUsage();
+			}
+			hiddenSinceMs = null;
+		}
+	});
 
 	// Keep countdowns + markers updated.
 	setInterval(tick, 1000);
