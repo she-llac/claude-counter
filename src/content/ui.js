@@ -10,24 +10,16 @@
 	}
 
 	function formatResetCountdown(timestampMs) {
-		// <= 0: reset time reached
 		const diffMs = timestampMs - Date.now();
-		if (diffMs <= 0) return '0s';
+		if (diffMs <= 0) return '0m';
 
-		// < 1 min: show seconds
-		const totalSeconds = Math.floor(diffMs / 1000);
-		if (totalSeconds < 60) return `${totalSeconds}s`;
-
-		// < 1 hour: show minutes
-		const totalMinutes = Math.round(totalSeconds / 60);
+		const totalMinutes = Math.round(diffMs / (1000 * 60));
 		if (totalMinutes < 60) return `${totalMinutes}m`;
 
-		// < 1 day: show hours
 		const hours = Math.floor(totalMinutes / 60);
 		const minutes = totalMinutes % 60;
 		if (hours < 24) return `${hours}h ${minutes}m`;
 
-		// >= 1 day: show days
 		const days = Math.floor(hours / 24);
 		const remHours = hours % 24;
 		return `${days}d ${remHours}h`;
@@ -138,12 +130,14 @@
 				strokeColor: isDark ? CC.COLORS.PROGRESS_OUTLINE_DARK : CC.COLORS.PROGRESS_OUTLINE_LIGHT,
 				fillColor: isDark ? CC.COLORS.PROGRESS_FILL_DARK : CC.COLORS.PROGRESS_FILL_LIGHT,
 				markerColor: isDark ? CC.COLORS.PROGRESS_MARKER_DARK : CC.COLORS.PROGRESS_MARKER_LIGHT,
-				boldColor: isDark ? CC.COLORS.BOLD_DARK : CC.COLORS.BOLD_LIGHT
+				boldColor: isDark ? CC.COLORS.BOLD_DARK : CC.COLORS.BOLD_LIGHT,
+				sessionWarnColor: CC.settings?.sessionColor || CC.COLORS.RED_WARNING,
+				weeklyWarnColor: CC.settings?.weeklyColor || CC.COLORS.RED_WARNING
 			};
 		}
 
 		refreshProgressChrome() {
-			const { strokeColor, fillColor, markerColor } = this.getProgressChrome();
+			const { strokeColor, fillColor, markerColor, sessionWarnColor, weeklyWarnColor } = this.getProgressChrome();
 
 			const applyBarChrome = (bar, { fillWarn } = {}) => {
 				if (!bar) return;
@@ -154,8 +148,8 @@
 			};
 
 			applyBarChrome(this.lengthBar, { fillWarn: fillColor });
-			applyBarChrome(this.sessionBar, { fillWarn: CC.COLORS.RED_WARNING });
-			applyBarChrome(this.weeklyBar, { fillWarn: CC.COLORS.RED_WARNING });
+			applyBarChrome(this.sessionBar, { fillWarn: sessionWarnColor });
+			applyBarChrome(this.weeklyBar, { fillWarn: weeklyWarnColor });
 		}
 
 		initialize() {
@@ -456,11 +450,17 @@
 			this.refreshProgressChrome();
 			const session = usage?.five_hour || null;
 			const weekly = usage?.seven_day || null;
-			const hasAnyUsage =
-				!!(session && typeof session.utilization === 'number') || !!(weekly && typeof weekly.utilization === 'number');
+			
+			const showSession = CC.settings?.showSessionBar !== false;
+			const showWeekly = CC.settings?.showWeeklyBar !== false;
+
+			const hasSession = !!(session && typeof session.utilization === 'number') && showSession;
+			const hasWeekly = !!(weekly && typeof weekly.utilization === 'number') && showWeekly;
+			
+			const hasAnyUsage = hasSession || hasWeekly;
 			this.usageLine?.classList.toggle('cc-hidden', !hasAnyUsage);
 
-			if (session && typeof session.utilization === 'number') {
+			if (hasSession) {
 				const rawPct = session.utilization;
 				const pct = Math.round(rawPct * 10) / 10;
 				this.sessionResetMs = session.resets_at ? Date.parse(session.resets_at) : null;
@@ -480,9 +480,10 @@
 				this.sessionWindowStartMs = null;
 			}
 
-			const hasWeekly = weekly && typeof weekly.utilization === 'number';
 			this.weeklyGroup?.classList.toggle('cc-hidden', !hasWeekly);
 			this.sessionGroup?.classList.toggle('cc-usageGroup--single', !hasWeekly);
+			this.sessionGroup?.classList.toggle('cc-hidden', !hasSession);
+			this.weeklyGroup?.classList.toggle('cc-usageGroup--single', !hasSession);
 
 			if (hasWeekly) {
 				this.weeklyUsageSpan.classList.remove('cc-hidden');

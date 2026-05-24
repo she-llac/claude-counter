@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Claude Counter Settings</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <h2>Claude Counter</h2>
+
+    <div class="section">
+      <h3>Settings</h3>
+      
+      <div class="setting-row">
+        <label for="showSessionBar">Show Session Bar</label>
+        <input type="checkbox" id="showSessionBar" checked>
+      </div>
+      
+      <div class="setting-row">
+        <label for="showWeeklyBar">Show Weekly Bar</label>
+        <input type="checkbox" id="showWeeklyBar" checked>
+      </div>
+
+      <div class="setting-row">
+        <label for="sessionColor">Session Warn Color</label>
+        <input type="color" id="sessionColor" value="#ce2029">
+      </div>
+
+      <div class="setting-row">
+        <label for="weeklyColor">Weekly Warn Color</label>
+        <input type="color" id="weeklyColor" value="#ce2029">
+      </div>
+
+      <button id="resetDefaultsBtn" class="btn">Reset Defaults</button>
+    </div>
+
+    <div class="section">
+      <h3>Daily Usage History (Local)</h3>
+      <div class="history-table-container">
+        <table id="historyTable">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Total Tokens</th>
+            </tr>
+          </thead>
+          <tbody>
+            <!-- Populated by JS -->
+          </tbody>
+        </table>
+      </div>
+      <button id="clearHistoryBtn" class="btn btn-danger">Clear History</button>
+    </div>
+
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>
