@@ -10,6 +10,29 @@
 		return match ? match[1] : null;
 	}
 
+	CC.settings = {
+		showSessionBar: true,
+		showWeeklyBar: true,
+		sessionColor: '#ce2029',
+		weeklyColor: '#ce2029'
+	};
+
+	try {
+		if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+			chrome.storage.local.get(['cc_settings'], (data) => {
+				if (data.cc_settings) {
+					CC.settings = { ...CC.settings, ...data.cc_settings };
+				}
+			});
+			chrome.storage.onChanged.addListener((changes, area) => {
+				if (area === 'local' && changes.cc_settings) {
+					CC.settings = { ...CC.settings, ...changes.cc_settings.newValue };
+					if (usageState) applyUsageUpdate(usageState, 'settings_change'); // re-render
+				}
+			});
+		}
+	} catch (e) {}
+
 	function getOrgIdFromCookie() {
 		try {
 			return document.cookie
@@ -200,6 +223,27 @@
 		ui.setPendingCache(true);
 	}
 
+	let maxSeenTokens = 0;
+	let currentConversationBaseline = null;
+
+	function logDailyTokens(delta) {
+		if (delta <= 0) return;
+		try {
+			if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+				const dateStr = new Date().toISOString().split('T')[0];
+				chrome.storage.local.get(['cc_daily_usage'], (res) => {
+					const usage = res.cc_daily_usage || {};
+					if (!usage[dateStr]) {
+						usage[dateStr] = { total_tokens: 0, last_updated: 0 };
+					}
+					usage[dateStr].total_tokens += delta;
+					usage[dateStr].last_updated = Date.now();
+					chrome.storage.local.set({ cc_daily_usage: usage });
+				});
+			}
+		} catch (e) {}
+	}
+
 	async function handleConversationPayload({ orgId, conversationId, data }) {
 		if (!conversationId || conversationId !== currentConversationId) return;
 		updateOrgIdIfNeeded(orgId);
@@ -207,6 +251,18 @@
 
 		const metrics = await CC.tokens.computeConversationMetrics(data);
 		ui.setConversationMetrics({ totalTokens: metrics.totalTokens, cachedUntil: metrics.cachedUntil });
+
+		// Local token logging logic (baseline and positive deltas only)
+		if (currentConversationBaseline !== conversationId) {
+			currentConversationBaseline = conversationId;
+			maxSeenTokens = metrics.totalTokens || 0;
+		} else {
+			const delta = (metrics.totalTokens || 0) - maxSeenTokens;
+			if (delta > 0) {
+				maxSeenTokens = metrics.totalTokens;
+				logDailyTokens(delta);
+			}
+		}
 	}
 
 	function handleMessageLimit(messageLimit) {
