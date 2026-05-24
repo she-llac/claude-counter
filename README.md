@@ -1,6 +1,6 @@
 # Claude Counter (Enhanced Fork)
 
-> **Note:** This is an enhanced fork of the original [Claude Counter](https://github.com/da1g/claude-counter). It introduces a settings popup for UI customization and local daily token usage tracking.
+> **Note:** This is an enhanced fork of the original [Claude Counter](https://github.com/she-llac/claude-counter). It introduces a settings popup for UI customization and local daily token usage tracking.
 
 
 A minimal browser extension that shows token count, cache timer, and usage bars on claude.ai.
