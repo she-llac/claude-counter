@@ -10,6 +10,10 @@
     }
   },
   "description": "Shows ~token count, cache timer, and native session/weekly usage bars on claude.ai.",
+  "permissions": ["storage", "notifications"],
+  "background": {
+    "service_worker": "src/background.js"
+  },
   "icons": {
     "16": "icons/icon16.png",
     "32": "icons/icon32.png",
@@ -37,6 +41,7 @@
         "src/content/bridge-client.js",
         "src/vendor/o200k_base.js",
         "src/content/tokens.js",
+        "src/notifications.js",
         "src/content/ui.js",
         "src/content/main.js"
       ]

@@ -125,3 +125,26 @@
 .cc-hidden {
 	display: none !important;
 }
+
+/* Notification bell toggle */
+.cc-notifyBtn {
+	background: none;
+	border: none;
+	cursor: pointer;
+	padding: 0 2px;
+	font-size: 11px;
+	line-height: 1;
+	opacity: 0.55;
+	transition: opacity 150ms ease, transform 100ms ease;
+	flex-shrink: 0;
+}
+
+.cc-notifyBtn:hover {
+	opacity: 1;
+	transform: scale(1.15);
+}
+
+.cc-notifyBtn--off {
+	opacity: 0.25;
+	filter: grayscale(1);
+}

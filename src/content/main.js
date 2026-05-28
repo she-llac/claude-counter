@@ -21,12 +21,6 @@
 		}
 	}
 
-	/**
-	 * Wait for an element to appear in the DOM using MutationObserver.
-	 * More efficient than polling - reacts immediately when element appears.
-	 * @param {string} selector - CSS selector
-	 * @param {number} [timeoutMs] - Optional timeout in ms. Returns null if timeout expires.
-	 */
 	function waitForElement(selector, timeoutMs) {
 		return new Promise((resolve) => {
 			const existing = document.querySelector(selector);
@@ -69,9 +63,7 @@
 			}
 		};
 
-		// Listen for custom event from bridge (history methods wrapped early)
 		window.addEventListener('cc:urlchange', fireIfChanged);
-		// Also popstate for back/forward buttons
 		window.addEventListener('popstate', fireIfChanged);
 
 		return () => {
@@ -121,8 +113,8 @@
 	let currentConversationId = null;
 	let currentOrgId = null;
 
-	let usageState = null; // last snapshot
-	let usageResetMs = { five_hour: null, seven_day: null }; // cached parsed timestamps
+	let usageState = null;
+	let usageResetMs = { five_hour: null, seven_day: null };
 	let lastUsageSseMs = 0;
 	let usageFetchInFlight = false;
 	let lastUsageUpdateMs = 0;
@@ -135,7 +127,6 @@
 	});
 	ui.initialize();
 
-	// Bridge must be ready before we can make requests
 	const bridgeReady = CC.injectBridgeOnce();
 
 	function applyUsageUpdate(normalized, source) {
@@ -144,10 +135,17 @@
 		usageState = normalized;
 		lastUsageUpdateMs = now;
 		if (source === 'sse') lastUsageSseMs = now;
-		// Cache parsed timestamps to avoid Date.parse() every tick
 		usageResetMs.five_hour = normalized.five_hour?.resets_at ? Date.parse(normalized.five_hour.resets_at) : null;
 		usageResetMs.seven_day = normalized.seven_day?.resets_at ? Date.parse(normalized.seven_day.resets_at) : null;
 		ui.setUsage(normalized);
+
+		// Usage threshold notifications
+		if (CC.notifications) {
+			if (normalized.five_hour?.utilization != null)
+				CC.notifications.notifyIfNeeded('session', normalized.five_hour.utilization, usageResetMs.five_hour);
+			if (normalized.seven_day?.utilization != null)
+				CC.notifications.notifyIfNeeded('weekly', normalized.seven_day.utilization, usageResetMs.seven_day);
+		}
 	}
 
 	function updateOrgIdIfNeeded(newOrgId) {
@@ -221,8 +219,6 @@
 	async function handleUrlChange() {
 		currentConversationId = getConversationId();
 
-		// Attach usage line and header independently - they have different anchor elements
-		// and CHAT_MENU_TRIGGER doesn't exist on home/new pages
 		waitForElement(CC.DOM.MODEL_SELECTOR_DROPDOWN, 60000).then((el) => {
 			if (el) ui.attachUsageLine();
 		});
@@ -235,26 +231,22 @@
 			return;
 		}
 
-		// Best-effort orgId from cookie.
 		updateOrgIdIfNeeded(getOrgIdFromCookie());
 
 		await refreshConversation();
 
-		// Usage is org-level, not conversation-level. Only fetch on first load or if stale.
 		if (!usageState) await refreshUsage();
 	}
 
 	const unobserveUrl = observeUrlChanges(handleUrlChange);
 	window.addEventListener('beforeunload', unobserveUrl);
 
-	// Refresh on branch navigation - watch for the branch indicator to change
 	let branchObserver = null;
 	document.addEventListener('click', (e) => {
 		if (!currentConversationId) return;
 		const btn = e.target.closest('button[aria-label="Previous"], button[aria-label="Next"]');
 		if (!btn) return;
 
-		// Find the branch indicator span (matches "X / Y" pattern) near the clicked button
 		const container = btn.closest('.inline-flex');
 		const spans = container?.querySelectorAll('span') || [];
 		const indicator = Array.from(spans).find((s) => /^\d+\s*\/\s*\d+$/.test(s.textContent.trim()));
@@ -262,10 +254,8 @@
 
 		const originalText = indicator.textContent;
 
-		// Clean up any existing observer
 		if (branchObserver) branchObserver.disconnect();
 
-		// Watch for the indicator text to change (with cleanup timeout)
 		branchObserver = new MutationObserver(() => {
 			if (indicator.textContent !== originalText) {
 				branchObserver.disconnect();
@@ -276,7 +266,6 @@
 
 		branchObserver.observe(indicator, { childList: true, characterData: true, subtree: true });
 
-		// Clean up if nothing changes after 60 seconds
 		setTimeout(() => {
 			if (branchObserver) {
 				branchObserver.disconnect();
@@ -285,13 +274,11 @@
 		}, 60000);
 	});
 
-	// Initial attach + fetches
 	handleUrlChange();
 
 	function tick() {
 		ui.tick();
 
-		// Refresh usage when a window ends (5h / 7d). SSE won't fire at rollover unless a message is sent.
 		const now = Date.now();
 
 		if (usageResetMs.five_hour && now >= usageResetMs.five_hour && rolloverHandledForResetMs.five_hour !== usageResetMs.five_hour) {
@@ -303,15 +290,25 @@
 			refreshUsage();
 		}
 
-		// Optional hourly safety refresh.
 		const ONE_HOUR_MS = 60 * 60 * 1000;
 		const sseAge = now - lastUsageSseMs;
 		const anyAge = now - lastUsageUpdateMs;
 		if (!document.hidden && sseAge > ONE_HOUR_MS && anyAge > ONE_HOUR_MS) {
 			refreshUsage();
 		}
+
+		// Time-based and reset notifications (checked every tick)
+		if (CC.notifications && usageState) {
+			if (usageResetMs.five_hour) {
+				CC.notifications.notifyIfResetSoon('session', usageResetMs.five_hour, usageState.five_hour?.utilization ?? 100);
+				CC.notifications.notifyOnReset('session', usageResetMs.five_hour);
+			}
+			if (usageResetMs.seven_day) {
+				CC.notifications.notifyIfResetSoon('weekly', usageResetMs.seven_day, usageState.seven_day?.utilization ?? 100);
+				CC.notifications.notifyOnReset('weekly', usageResetMs.seven_day);
+			}
+		}
 	}
 
-	// Keep countdowns + markers updated.
 	setInterval(tick, 1000);
 })();

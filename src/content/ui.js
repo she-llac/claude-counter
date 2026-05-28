@@ -126,6 +126,7 @@
 			this.refreshingUsage = false;
 
 			this.domObserver = null;
+			this.notifyBtn = null;
 		}
 
 		getProgressChrome() {
@@ -180,6 +181,11 @@
 			this._setupTooltips();
 			this._observeDom();
 			this._observeTheme();
+
+			// Wire up the bell toggle — CC.notifications is loaded before ui.js
+			if (CC.notifications) {
+				CC.notifications.onToggle((enabled) => this.updateNotifyButton(enabled));
+			}
 		}
 
 		_observeTheme() {
@@ -260,9 +266,21 @@
 			this.usageLine.appendChild(this.sessionGroup);
 			this.usageLine.appendChild(this.weeklyGroup);
 
+			// Bell toggle button — click to enable/disable notifications
+			this.notifyBtn = document.createElement('button');
+			this.notifyBtn.className = 'cc-notifyBtn';
+			this.notifyBtn.title = 'Toggle usage notifications';
+			this.notifyBtn.textContent = '🔔';
+			this.notifyBtn.addEventListener('click', async (e) => {
+				e.stopPropagation(); // don't trigger the usage-refresh click
+				if (CC.notifications) await CC.notifications.toggle();
+			});
+			this.usageLine.appendChild(this.notifyBtn);
+
 			this.refreshProgressChrome();
 
-			this.usageLine.addEventListener('click', async () => {
+			this.usageLine.addEventListener('click', async (e) => {
+				if (e.target.closest('.cc-notifyBtn')) return; // handled above
 				if (!this.onUsageRefresh || this.refreshingUsage) return;
 				this.refreshingUsage = true;
 				this.usageLine.classList.add('cc-usageRow--dim');
@@ -273,6 +291,15 @@
 					this.refreshingUsage = false;
 				}
 			});
+		}
+
+		updateNotifyButton(enabled) {
+			if (!this.notifyBtn) return;
+			this.notifyBtn.textContent = enabled ? '🔔' : '🔕';
+			this.notifyBtn.title = enabled
+				? 'Notifications on — click to disable'
+				: 'Notifications off — click to enable';
+			this.notifyBtn.classList.toggle('cc-notifyBtn--off', !enabled);
 		}
 
 		_setupTooltips() {

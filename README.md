@@ -6,9 +6,10 @@ A minimal browser extension that shows token count, cache timer, and usage bars 
 
 ## Features
 
-- **Token count** — Approximate token count for the current conversation, with a mini progress bar against the 200k context limit
-- **Cache timer** — Countdown showing how long the conversation remains cached (cheaper to continue)
-- **Usage bars** — Session (5-hour) and weekly (7-day) usage from Claude's native API, with progress bars and reset countdowns (more accurate than the rounded /usage page)
+- **Usage notifications** — Browser notifications when session or weekly usage crosses 50%, 75%, and 90%
+- **Reset countdown alerts** — Notified 1 hour and 30 minutes before your session resets if you still have capacity remaining (skipped if usage is above 90%)
+- **Session reset alert** — Notified when your session resets so you know you have 100% available again
+- **Bell toggle** 🔔 — Click to enable/disable notifications, persists across sessions
 
 ## Installation
 
