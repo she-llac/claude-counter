@@ -277,7 +277,7 @@
 
 		_setupTooltips() {
 			this.lengthTooltip = makeTooltip(
-				"Approximate tokens (excludes system prompt).\nUses a generic tokenizer, may differ from Claude's count.\nBecomes invalid after context compaction.\nBar scale: 200k tokens (Claude's maximum context length, will compact before then)."
+				"Tokens aproximados (exclui o prompt do sistema).\nUsa um tokenizador genérico, pode diferir da contagem do Claude.\nTorna-se inválido após compactação do contexto.\nEscala da barra: 200k tokens (limite máximo de contexto do Claude, compacta antes disso)."
 			);
 			setupTooltip(
 				this.lengthGroup,
@@ -287,19 +287,19 @@
 
 			setupTooltip(
 				this.cachedDisplay,
-				makeTooltip("Messages sent while cached are significantly cheaper."),
+				makeTooltip("Mensagens enviadas enquanto em cache são significativamente mais baratas."),
 				{ topOffset: 8 }
 			);
 
 			setupTooltip(
 				this.sessionGroup,
-				makeTooltip("5-hour session window.\nThe bar shows your usage.\nThe line marks where you are in the window."),
+				makeTooltip("Janela de sessão de 5 horas.\nA barra mostra seu uso.\nA linha marca onde você está na janela."),
 				{ topOffset: 8 }
 			);
 
 			setupTooltip(
 				this.weeklyGroup,
-				makeTooltip("7-day usage window.\nThe bar shows your usage.\nThe line marks where you are in the window."),
+				makeTooltip("Janela de uso de 7 dias.\nA barra mostra seu uso.\nA linha marca onde você está na janela."),
 				{ topOffset: 8 }
 			);
 		}
@@ -389,7 +389,7 @@
 				this.lengthGroup.replaceChildren(this.lengthDisplay);
 				if (this.lengthTooltip) {
 					this.lengthTooltip.textContent =
-						"Approximate tokens (excludes system prompt).\nUses a generic tokenizer, may differ from Claude's count.\nThis count is invalid after compaction.";
+						"Tokens aproximados (exclui o prompt do sistema).\nUsa um tokenizador genérico, pode diferir da contagem do Claude.\nEsta contagem é inválida após a compactação.";
 				}
 			} else {
 				this.lengthDisplay.style.opacity = '';
@@ -420,7 +420,7 @@
 					textContent: formatSeconds(secondsLeft)
 				});
 				this.cacheTimeSpan.style.color = boldColor;
-				this.cachedDisplay.replaceChildren(document.createTextNode('cached for\u00A0'), this.cacheTimeSpan);
+				this.cachedDisplay.replaceChildren(document.createTextNode('em cache por\u00A0'), this.cacheTimeSpan);
 			} else {
 				this.lastCachedUntilMs = null;
 				this.cacheTimeSpan = null;
@@ -465,8 +465,8 @@
 				const pct = Math.round(rawPct * 10) / 10;
 				this.sessionResetMs = session.resets_at ? Date.parse(session.resets_at) : null;
 				this.sessionWindowStartMs = this.sessionResetMs ? this.sessionResetMs - 5 * 60 * 60 * 1000 : null;
-				const resetText = this.sessionResetMs ? ` · resets in ${formatResetCountdown(this.sessionResetMs)}` : '';
-				this.sessionUsageSpan.textContent = `Session: ${pct}%${resetText}`;
+				const resetText = this.sessionResetMs ? ` · renova em ${formatResetCountdown(this.sessionResetMs)}` : '';
+				this.sessionUsageSpan.textContent = `Sessão: ${pct}%${resetText}`;
 
 				const width = Math.max(0, Math.min(100, rawPct));
 				this.sessionBarFill.style.width = `${width}%`;
@@ -492,8 +492,8 @@
 				const pct = Math.round(rawPct * 10) / 10;
 				this.weeklyResetMs = weekly.resets_at ? Date.parse(weekly.resets_at) : null;
 				this.weeklyWindowStartMs = this.weeklyResetMs ? this.weeklyResetMs - 7 * 24 * 60 * 60 * 1000 : null;
-				const resetText = this.weeklyResetMs ? ` · resets in ${formatResetCountdown(this.weeklyResetMs)}` : '';
-				this.weeklyUsageSpan.textContent = `Weekly: ${pct}%${resetText}`;
+				const resetText = this.weeklyResetMs ? ` · renova em ${formatResetCountdown(this.weeklyResetMs)}` : '';
+				this.weeklyUsageSpan.textContent = `Semanal: ${pct}%${resetText}`;
 
 				const width = Math.max(0, Math.min(100, rawPct));
 				this.weeklyBarFill.style.width = `${width}%`;
@@ -554,17 +554,17 @@
 
 			// Reset countdown text + time markers
 			if (this.sessionResetMs && this.sessionUsageSpan?.textContent) {
-				const idx = this.sessionUsageSpan.textContent.indexOf('· resets in');
+				const idx = this.sessionUsageSpan.textContent.indexOf('· renova em');
 				if (idx !== -1) {
-					const prefix = this.sessionUsageSpan.textContent.slice(0, idx + '· resets in '.length);
+					const prefix = this.sessionUsageSpan.textContent.slice(0, idx + '· renova em '.length);
 					this.sessionUsageSpan.textContent = `${prefix}${formatResetCountdown(this.sessionResetMs)}`;
 				}
 			}
 
 			if (this.weeklyResetMs && this.weeklyUsageSpan?.textContent) {
-				const idx = this.weeklyUsageSpan.textContent.indexOf('· resets in');
+				const idx = this.weeklyUsageSpan.textContent.indexOf('· renova em');
 				if (idx !== -1) {
-					const prefix = this.weeklyUsageSpan.textContent.slice(0, idx + '· resets in '.length);
+					const prefix = this.weeklyUsageSpan.textContent.slice(0, idx + '· renova em '.length);
 					this.weeklyUsageSpan.textContent = `${prefix}${formatResetCountdown(this.weeklyResetMs)}`;
 				}
 			}

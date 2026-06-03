@@ -1,50 +1,50 @@
 # Claude Counter
 
-A minimal browser extension that shows token count, cache timer, and usage bars on claude.ai.
+Uma extensão de navegador minimalista que exibe contagem de tokens, timer de cache e barras de uso no claude.ai.
 
-![Claude Counter screenshot](./screenshot.png)
+![Captura de tela do Claude Counter](./screenshot.png)
 
-## Features
+## Funcionalidades
 
-- **Token count** — Approximate token count for the current conversation, with a mini progress bar against the 200k context limit
-- **Cache timer** — Countdown showing how long the conversation remains cached (cheaper to continue)
-- **Usage bars** — Session (5-hour) and weekly (7-day) usage from Claude's native API, with progress bars and reset countdowns (more accurate than the rounded /usage page)
+- **Contagem de tokens** — Contagem aproximada de tokens da conversa atual, com uma mini barra de progresso em relação ao limite de 200k tokens do contexto
+- **Timer de cache** — Contagem regressiva mostrando por quanto tempo a conversa permanece em cache (mais barato continuar)
+- **Barras de uso** — Uso de sessão (5 horas) e semanal (7 dias) da API nativa do Claude, com barras de progresso e contagens regressivas de renovação (mais preciso do que a página /usage com valores arredondados)
 
-## Installation
+## Instalação
 
 **Chrome / Edge / Chromium**
 
-1. Download [`claude-counter-0.4.2.zip`](../../releases/download/v0.4.2/claude-counter-0.4.2.zip)
-2. Go to `chrome://extensions` and enable **Developer mode**
-3. Drag and drop the zip onto the page
+1. Baixe [`claude-counter-0.4.2.zip`](../../releases/download/v0.4.2/claude-counter-0.4.2.zip)
+2. Acesse `chrome://extensions` e ative o **Modo do desenvolvedor**
+3. Arraste e solte o arquivo zip na página
 
 **Firefox**
 
-1. Download [`claude-counter-0.4.2.xpi`](../../releases/download/v0.4.2/claude-counter-0.4.2.xpi)
-2. Drag it into any Firefox window and click **Add**
+1. Baixe [`claude-counter-0.4.2.xpi`](../../releases/download/v0.4.2/claude-counter-0.4.2.xpi)
+2. Arraste para qualquer janela do Firefox e clique em **Adicionar**
 
 **Userscript**
 
-1. Install the userscript from [`claude-counter.user.js`](./userscript/claude-counter.user.js)
+1. Instale o userscript a partir de [`claude-counter.user.js`](./userscript/claude-counter.user.js)
 
-## How it works
+## Como funciona
 
-- Intercepts Claude's API responses to read conversation data and usage info
-- Uses a vendored tokenizer (`o200k_base`) for approximate token counting
-- Uses Claude’s `/usage` plus live SSE `message_limit` data; the SSE provides exact, unrounded utilization fractions, so the progress bars are more accurate than the rounded percentages shown on Claude’s native /usage page
-- Watches for DOM changes to inject UI elements as you navigate
+- Intercepta as respostas da API do Claude para ler dados de conversa e informações de uso
+- Usa um tokenizador empacotado (`o200k_base`) para contagem aproximada de tokens
+- Utiliza o endpoint `/usage` do Claude junto com dados SSE `message_limit` em tempo real; o SSE fornece frações de utilização exatas e não arredondadas, tornando as barras de progresso mais precisas do que os percentuais exibidos na página /usage nativa do Claude
+- Monitora mudanças no DOM para injetar elementos de UI durante a navegação
 
-## Privacy
+## Privacidade
 
-- All data stays local — no external servers, no tracking
-- Reads your `lastActiveOrg` cookie to query Claude's `/usage` endpoint
-- Makes requests only to `claude.ai`
+- Todos os dados ficam locais — sem servidores externos, sem rastreamento
+- Lê o cookie `lastActiveOrg` para consultar o endpoint `/usage` do Claude
+- Faz requisições apenas para `claude.ai`
 
-## Credits
+## Créditos
 
-- Token counting via [gpt-tokenizer](https://github.com/niieani/gpt-tokenizer) (MIT)
-- Inspired by [Claude Usage Tracker](https://github.com/lugia19/Claude-Usage-Extension) by lugia19
+- Contagem de tokens via [gpt-tokenizer](https://github.com/niieani/gpt-tokenizer) (MIT)
+- Inspirado por [Claude Usage Tracker](https://github.com/lugia19/Claude-Usage-Extension) de lugia19
 
-## License
+## Licença
 
 MIT
