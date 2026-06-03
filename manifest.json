@@ -9,7 +9,7 @@
       "data_collection_permissions": { "required": ["none"] }
     }
   },
-  "description": "Shows ~token count, cache timer, and native session/weekly usage bars on claude.ai.",
+  "description": "Exibe contagem de tokens, timer de cache e barras de uso de sessão/semanal no claude.ai.",
   "icons": {
     "16": "icons/icon16.png",
     "32": "icons/icon32.png",
