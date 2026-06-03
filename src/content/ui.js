@@ -9,28 +9,29 @@
 		return `${minutes}:${String(seconds).padStart(2, '0')}`;
 	}
 
+	const pad2 = (n) => (n < 10 ? '\u2007' : '') + n;
 	function formatResetCountdown(timestampMs) {
 		// <= 0: reset time reached
 		const diffMs = timestampMs - Date.now();
-		if (diffMs <= 0) return '0s';
+		if (diffMs <= 0) return `${pad2(0)}s`;
 
 		// < 1 min: show seconds
 		const totalSeconds = Math.floor(diffMs / 1000);
-		if (totalSeconds < 60) return `${totalSeconds}s`;
+		if (totalSeconds < 60) return `${pad2(totalSeconds)}s`;
 
 		// < 1 hour: show minutes
 		const totalMinutes = Math.round(totalSeconds / 60);
-		if (totalMinutes < 60) return `${totalMinutes}m`;
+		if (totalMinutes < 60) return `${pad2(totalMinutes)}m`;
 
 		// < 1 day: show hours
 		const hours = Math.floor(totalMinutes / 60);
 		const minutes = totalMinutes % 60;
-		if (hours < 24) return `${hours}h ${minutes}m`;
+		if (hours < 24) return `${pad2(hours)}h ${pad2(minutes)}m`;
 
 		// >= 1 day: show days
 		const days = Math.floor(hours / 24);
 		const remHours = hours % 24;
-		return `${days}d ${remHours}h`;
+		return `${pad2(days)}d ${pad2(remHours)}h`;
 	}
 
 	function setupTooltip(element, tooltip, { topOffset = 10 } = {}) {
