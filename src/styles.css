@@ -1,20 +1,63 @@
-/* Header: tokens + cache timer */
+/*
+ * Claude Counter — Extension Styles
+ * Self-contained: no dependency on Claude's CSS classes or design tokens.
+ * Colors are set via CSS custom properties (populated by JS at runtime).
+ */
+
+/* ================================================================
+   CSS Custom Properties (defaults — overridden by sampleTheme())
+   ================================================================ */
+.cc-root,
+.cc-header,
+.cc-usageRow,
+.cc-tooltip,
+.cc-floating {
+	--cc-text: #e0e0e0;
+	--cc-text-muted: #999;
+	--cc-text-dim: #a3a3a3; /* WCAG AA compliant: ~5:1 ratio on #2c2c2a dark bg */
+	--cc-tooltip-bg: #1a1a1a;
+	--cc-tooltip-text: #f0f0f0;
+}
+
+/* ================================================================
+   Header: tokens + cache timer
+   ================================================================ */
 .cc-header {
+	color: var(--cc-text-muted);
+	font-size: 12px;
+	padding: 0 4px;
 	margin-top: 2px;
 	user-select: none;
+	min-height: 18px; /* Reduce CLS: reserve space before content renders */
+	contain: layout style; /* Isolate layout recalculations */
 }
 
 .cc-headerItem {
 	white-space: nowrap;
 }
 
-/* Usage row: session + weekly */
+.cc-cacheTime {
+	/* color is set dynamically by JS (boldColor) */
+}
+
+/* ================================================================
+   Usage row: session + weekly
+   ================================================================ */
 .cc-usageRow {
 	position: relative;
 	z-index: 50;
 	cursor: pointer;
 	user-select: none;
 	transition: opacity 150ms ease;
+	color: var(--cc-text-dim);
+	font-size: 11px;
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	gap: 12px;
+	width: 100%;
+	min-height: 14px; /* Reduce CLS: reserve space before data loads */
+	contain: layout style; /* Isolate layout recalculations */
 }
 
 .cc-usageRow--dim {
@@ -41,7 +84,9 @@
 	white-space: nowrap;
 }
 
-/* Bars (mini + usage) */
+/* ================================================================
+   Bars (mini + usage)
+   ================================================================ */
 .cc-bar {
 	--cc-radius: 3px;
 	--cc-stroke: transparent;
@@ -100,7 +145,15 @@
 	flex: 1;
 }
 
-/* Tooltips */
+/* Inline bar container (replaces Claude's inline-flex utility) */
+.cc-barContainer {
+	display: inline-flex;
+	align-items: center;
+}
+
+/* ================================================================
+   Tooltips
+   ================================================================ */
 .cc-tooltip {
 	position: fixed;
 	z-index: 9999;
@@ -112,6 +165,8 @@
 	pointer-events: none;
 	opacity: 0;
 	transition: opacity 200ms ease;
+	background: var(--cc-tooltip-bg);
+	color: var(--cc-tooltip-text);
 }
 
 .cc-tooltipTrigger {
@@ -121,7 +176,91 @@
 	cursor: help;
 }
 
-/* Hide optional elements completely (no layout space) */
+/* ================================================================
+   Floating UI (top-right fallback)
+   ================================================================ */
+.cc-floating {
+	position: fixed;
+	top: 60px;
+	right: 16px;
+	z-index: 10000;
+	width: 300px;
+	padding: 10px 14px;
+	border-radius: 12px;
+	background: var(--cc-tooltip-bg, #1a1a1a);
+	color: var(--cc-text, #e0e0e0);
+	box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+	backdrop-filter: blur(12px);
+	font-size: 12px;
+	transition: opacity 200ms ease, transform 200ms ease;
+	user-select: none;
+}
+
+.cc-floating.cc-floating--collapsed {
+	transform: translateX(calc(100% - 30px));
+	opacity: 0.7;
+}
+
+.cc-floating__toggle {
+	position: absolute;
+	top: 8px;
+	left: -10px;
+	width: 20px;
+	height: 20px;
+	border-radius: 50%;
+	border: none;
+	background: var(--cc-tooltip-bg, #1a1a1a);
+	color: var(--cc-text-muted, #999);
+	font-size: 10px;
+	cursor: pointer;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.cc-floating__toggle:hover {
+	background: var(--cc-text-dim, #555);
+	color: var(--cc-text, #e0e0e0);
+}
+
+.cc-floating .cc-header {
+	padding: 0;
+	margin: 0 0 6px;
+}
+
+.cc-floating .cc-usageRow {
+	margin-top: 6px;
+	flex-direction: column;
+	gap: 6px;
+}
+
+.cc-floating .cc-usageGroup {
+	width: 100%;
+}
+
+.cc-floating .cc-usageGroup--weekly {
+	justify-content: flex-start;
+}
+
+/* ================================================================
+   Health indicator dot
+   ================================================================ */
+.cc-health {
+	width: 6px;
+	height: 6px;
+	border-radius: 50%;
+	display: inline-block;
+	margin-left: 4px;
+}
+
+.cc-health--ok    { background: #22c55e; }
+.cc-health--warn  { background: #f59e0b; }
+.cc-health--error { background: #ef4444; }
+
+/* ================================================================
+   Utility
+   ================================================================ */
 .cc-hidden {
 	display: none !important;
 }

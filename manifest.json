@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Claude Counter",
-  "version": "0.4.2",
+  "version": "0.5.0",
   "browser_specific_settings": {
     "gecko": {
       "id": "{236c6889-52b6-4454-bc4b-5a2ad18effa2}",
@@ -9,7 +9,7 @@
       "data_collection_permissions": { "required": ["none"] }
     }
   },
-  "description": "Shows ~token count, cache timer, and native session/weekly usage bars on claude.ai.",
+  "description": "Shows ~token count, cache timer, model-aware context bar, and native session/weekly usage bars on claude.ai. Zero permissions, all data stays local.",
   "icons": {
     "16": "icons/icon16.png",
     "32": "icons/icon32.png",
@@ -28,12 +28,16 @@
       "128": "icons/icon128.png"
     }
   },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'none'"
+  },
   "content_scripts": [
     {
       "matches": ["https://claude.ai/*"],
       "css": ["src/styles.css"],
       "js": [
         "src/content/constants.js",
+        "src/content/dom-discovery.js",
         "src/content/bridge-client.js",
         "src/vendor/o200k_base.js",
         "src/content/tokens.js",
@@ -45,7 +49,8 @@
   "web_accessible_resources": [
     {
       "resources": ["src/injected/bridge.js"],
-      "matches": ["https://claude.ai/*"]
+      "matches": ["https://claude.ai/*"],
+      "use_dynamic_url": true
     }
   ]
 }

@@ -22,6 +22,15 @@
 	}
 
 	/**
+	 * Check if the current page is a chat page (where we should activate).
+	 * We don't inject UI on /settings, /pricing, /login, etc.
+	 */
+	function isActivePage() {
+		const path = window.location.pathname;
+		return path === '/' || path.startsWith('/chat');
+	}
+
+	/**
 	 * Wait for an element to appear in the DOM using MutationObserver.
 	 * More efficient than polling - reacts immediately when element appears.
 	 * @param {string} selector - CSS selector
@@ -80,52 +89,16 @@
 		};
 	}
 
-	function parseUsageFromUsageEndpoint(raw) {
-		if (!raw || typeof raw !== 'object') return null;
-
-		const normalizeWindow = (w, hours) => {
-			if (!w || typeof w !== 'object') return null;
-			if (typeof w.utilization !== 'number' || !Number.isFinite(w.utilization)) return null;
-			const utilization = Math.max(0, Math.min(100, w.utilization));
-			const resets_at = typeof w.resets_at === 'string' ? w.resets_at : null;
-			return { utilization, resets_at, window_hours: hours };
-		};
-
-		const fiveHour = normalizeWindow(raw.five_hour, 5);
-		const sevenDay = normalizeWindow(raw.seven_day, 24 * 7);
-
-		if (!fiveHour && !sevenDay) return null;
-		return { five_hour: fiveHour, seven_day: sevenDay };
-	}
-
-	function parseUsageFromMessageLimit(raw) {
-		if (!raw?.windows || typeof raw.windows !== 'object') return null;
-
-		const normalizeWindow = (w, hours) => {
-			if (!w || typeof w !== 'object') return null;
-			if (typeof w.utilization !== 'number' || !Number.isFinite(w.utilization)) return null;
-			const utilization = Math.max(0, Math.min(100, w.utilization * 100));
-			const resets_at = typeof w.resets_at === 'number' && Number.isFinite(w.resets_at)
-				? new Date(w.resets_at * 1000).toISOString()
-				: null;
-			return { utilization, resets_at, window_hours: hours };
-		};
-
-		const fiveHour = normalizeWindow(raw.windows['5h'], 5);
-		const sevenDay = normalizeWindow(raw.windows['7d'], 24 * 7);
-
-		if (!fiveHour && !sevenDay) return null;
-		return { five_hour: fiveHour, seven_day: sevenDay };
-	}
-
 	let currentConversationId = null;
 	let currentOrgId = null;
+	let currentContextLimit = CC.CONST.DEFAULT_CONTEXT_LIMIT;
 
 	let usageState = null; // last snapshot
 	let usageResetMs = { five_hour: null, seven_day: null }; // cached parsed timestamps
 	let lastUsageSseMs = 0;
 	let usageFetchInFlight = false;
 	let lastUsageUpdateMs = 0;
+	const MIN_USAGE_INTERVAL_MS = 30000; // S13: rate limit usage API calls
 	const rolloverHandledForResetMs = { five_hour: null, seven_day: null };
 
 	const ui = new CC.ui.CounterUI({
@@ -156,12 +129,28 @@
 		}
 	}
 
+	/**
+	 * Detect and apply the active model's context limit.
+	 */
+	function updateModelContext() {
+		if (!CC.DOMDiscovery) return;
+		const model = CC.DOMDiscovery.detectModel();
+		if (model.contextLimit !== currentContextLimit) {
+			currentContextLimit = model.contextLimit;
+			ui.setContextLimit(currentContextLimit);
+			CC.status.model = model.name;
+			CC.log('Model detected:', model.name, '→ context limit:', model.contextLimit.toLocaleString());
+		}
+	}
+
 	async function refreshUsage() {
 		await bridgeReady;
 		const orgId = currentOrgId || getOrgIdFromCookie();
 		if (!orgId) return;
 		updateOrgIdIfNeeded(orgId);
 
+		// S13: rate limit usage API calls
+		if (Date.now() - lastUsageUpdateMs < MIN_USAGE_INTERVAL_MS) return;
 		if (usageFetchInFlight) return;
 		usageFetchInFlight = true;
 		let raw;
@@ -173,7 +162,8 @@
 			usageFetchInFlight = false;
 		}
 
-		const parsed = parseUsageFromUsageEndpoint(raw);
+		// Use centralized normalizer
+		const parsed = CC.normalize.usage(raw);
 		applyUsageUpdate(parsed, 'usage');
 	}
 
@@ -210,7 +200,8 @@
 	}
 
 	function handleMessageLimit(messageLimit) {
-		const parsed = parseUsageFromMessageLimit(messageLimit);
+		// Use centralized normalizer
+		const parsed = CC.normalize.messageLimit(messageLimit);
 		applyUsageUpdate(parsed, 'sse');
 	}
 
@@ -221,14 +212,26 @@
 	async function handleUrlChange() {
 		currentConversationId = getConversationId();
 
-		// Attach usage line and header independently - they have different anchor elements
-		// and CHAT_MENU_TRIGGER doesn't exist on home/new pages
-		waitForElement(CC.DOM.MODEL_SELECTOR_DROPDOWN, 60000).then((el) => {
-			if (el) ui.attachUsageLine();
-		});
-		waitForElement(CC.DOM.CHAT_MENU_TRIGGER, 60000).then((el) => {
-			if (el) ui.attachHeader();
-		});
+		// Only inject UI on chat pages
+		if (!isActivePage()) {
+			ui.setConversationMetrics();
+			return;
+		}
+
+		// Detect model and set context limit
+		updateModelContext();
+
+		// Try to attach UI immediately near the input area
+		const usageAnchor = CC.DOMDiscovery?.findUsageAnchor();
+		if (usageAnchor && usageAnchor.confidence !== 'low') {
+			ui.attach(); // attaches usage then header above it
+		} else {
+			// Wait for model selector to appear, then attach everything
+			waitForElement(CC.SELECTORS.modelSelector, 15000).then((el) => {
+				if (el) updateModelContext();
+				ui.attach(); // works with fallback if element not found
+			});
+		}
 
 		if (!currentConversationId) {
 			ui.setConversationMetrics();
@@ -244,6 +247,47 @@
 		if (!usageState) await refreshUsage();
 	}
 
+	// Watch for model selector changes (user switches models)
+	// Free tier: 200k for ALL models, so context limit won't change.
+	// Paid tier (future): 500k for Sonnet/Opus — would need refresh.
+	// Keep observer for logging + future paid tier detection.
+	let modelObserver = null;
+	function observeModelChanges() {
+		const modelBtn = document.querySelector(CC.SELECTORS.modelSelector);
+		if (!modelBtn) return;
+
+		// Disconnect previous observer if any
+		modelObserver?.disconnect();
+
+		modelObserver = new MutationObserver(() => {
+			const prevLimit = currentContextLimit;
+			const prevModel = CC.status.model;
+			updateModelContext();
+			if (CC.status.model !== prevModel) {
+				CC.log('Model switched:', prevModel, '→', CC.status.model);
+			}
+			// Only refresh if limit actually changed (future: paid tier detection)
+			if (currentContextLimit !== prevLimit) {
+				CC.log('Context limit changed:', prevLimit, '→', currentContextLimit);
+				refreshConversation();
+			}
+		});
+
+		// Watch both the button's attributes AND its parent (Claude may replace the button)
+		modelObserver.observe(modelBtn, {
+			attributes: true,
+			attributeFilter: ['aria-label'],
+		});
+
+		// Also watch the parent for child changes (button replacement)
+		if (modelBtn.parentElement) {
+			modelObserver.observe(modelBtn.parentElement, {
+				childList: true,
+				subtree: true,
+			});
+		}
+	}
+
 	const unobserveUrl = observeUrlChanges(handleUrlChange);
 	window.addEventListener('beforeunload', unobserveUrl);
 
@@ -255,7 +299,7 @@
 		if (!btn) return;
 
 		// Find the branch indicator span (matches "X / Y" pattern) near the clicked button
-		const container = btn.closest('.inline-flex');
+		const container = btn.closest('.inline-flex') || btn.parentElement;
 		const spans = container?.querySelectorAll('span') || [];
 		const indicator = Array.from(spans).find((s) => /^\d+\s*\/\s*\d+$/.test(s.textContent.trim()));
 		if (!indicator) return;
@@ -288,6 +332,12 @@
 	// Initial attach + fetches
 	handleUrlChange();
 
+	// Watch for model changes after initial load
+	waitForElement(CC.SELECTORS.modelSelector, 15000).then(() => {
+		observeModelChanges();
+	});
+
+	// --- Tick loop (with visibility-aware pause) ---
 	function tick() {
 		ui.tick();
 
@@ -312,6 +362,21 @@
 		}
 	}
 
-	// Keep countdowns + markers updated.
-	setInterval(tick, 1000);
+	// P2: Visibility-aware tick — pause when tab is hidden to save CPU
+	let tickInterval = setInterval(tick, 1000);
+
+	document.addEventListener('visibilitychange', () => {
+		if (document.hidden) {
+			clearInterval(tickInterval);
+			tickInterval = null;
+		} else {
+			if (!tickInterval) tickInterval = setInterval(tick, 1000);
+			tick(); // Immediate tick on visibility restore
+			// Re-detect model (user may have switched in another tab flow)
+			updateModelContext();
+		}
+	});
+
+	CC.log('Claude Counter', CC.VERSION, 'initialized');
+	CC.status.bridgeOk = true;
 })();

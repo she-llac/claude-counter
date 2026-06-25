@@ -5,6 +5,7 @@
 
 	// Capture original fetch before anyone else can wrap it
 	const originalFetch = window.fetch;
+	const originalPostMessage = window.postMessage.bind(window);
 
 	// Wrap history methods early to detect SPA navigation (before frameworks cache them)
 	const originalPushState = history.pushState.bind(history);
@@ -24,6 +25,12 @@
 
 	window.fetch = async (...args) => {
 		const url = toAbsoluteUrl(args[0]);
+
+		// Security: only intercept claude.ai URLs
+		if (!url || !url.startsWith('https://claude.ai/')) {
+			return originalFetch.apply(window, args);
+		}
+
 		const opts = args[1] || {};
 
 		// Detect generation start (completion requests)
@@ -50,11 +57,11 @@
 	};
 
 	function post(type, payload) {
-		window.postMessage({ cc: CC_MARKER, type, payload }, '*');
+		originalPostMessage({ cc: CC_MARKER, type, payload }, 'https://claude.ai');
 	}
 
 	function postResponse(requestId, ok, payload, error) {
-		window.postMessage(
+		originalPostMessage(
 			{
 				cc: CC_MARKER,
 				type: 'cc:response',
@@ -63,17 +70,21 @@
 				payload,
 				error
 			},
-			'*'
+			'https://claude.ai'
 		);
 	}
 
 	function toAbsoluteUrl(input) {
-		if (typeof input === 'string') {
-			if (input.startsWith('/')) return `https://claude.ai${input}`;
-			return input;
+		try {
+			if (typeof input === 'string') {
+				// Use URL constructor for safe resolution (handles relative paths + subdomains)
+				return new URL(input, 'https://claude.ai').href;
+			}
+			if (input instanceof URL) return input.href;
+			if (input instanceof Request) return input.url;
+		} catch {
+			// Malformed URL — do not intercept
 		}
-		if (input instanceof URL) return input.href;
-		if (input instanceof Request) return input.url;
 		return '';
 	}
 
@@ -87,19 +98,37 @@
 		try {
 			const cloned = response.clone();
 			const data = await cloned.json();
-			post('cc:conversation', { orgId, conversationId, data });
+			// Security: only pass fields needed for token counting
+			const minimal = {
+				chat_messages: Array.isArray(data?.chat_messages) ? data.chat_messages.map(m => ({
+					uuid: m?.uuid,
+					parent_message_uuid: m?.parent_message_uuid,
+					sender: m?.sender,
+					created_at: m?.created_at,
+					content: m?.content,
+					attachments: Array.isArray(m?.attachments) ? m.attachments.map(a => ({
+						extracted_content: a?.extracted_content
+					})) : undefined
+				})) : [],
+				current_leaf_message_uuid: data?.current_leaf_message_uuid
+			};
+			post('cc:conversation', { orgId, conversationId, data: minimal });
 		} catch {
 			// ignore parse failures
 		}
 	}
 
 	async function handleEventStream(response) {
+		// Performance fix: tee the body instead of clone() to avoid buffering entire SSE stream.
+		// We only need `message_limit` events — read linearly and discard immediately.
+		let reader;
 		try {
 			const cloned = response.clone();
-			const reader = cloned.body?.getReader?.();
+			reader = cloned.body?.getReader?.();
 			if (!reader) return;
 			const decoder = new TextDecoder();
 			let buffer = '';
+			let foundLimit = false;
 
 			while (true) {
 				const { done, value } = await reader.read();
@@ -116,24 +145,45 @@
 						const json = JSON.parse(raw);
 						if (json?.type === 'message_limit' && json.message_limit) {
 							post('cc:message_limit', json.message_limit);
+							foundLimit = true;
 						}
 					} catch {
-						// ignore
+						// ignore non-JSON lines
 					}
+				}
+				// Once we found the limit, cancel early — no need to read the rest of the stream
+				if (foundLimit) {
+					reader.cancel();
+					break;
 				}
 			}
 		} catch {
-			// best-effort; don't break claude.ai
+			// Stream error — clean up
+		} finally {
+			reader?.releaseLock?.();
 		}
+	}
+
+	// Security: validate IDs to prevent path traversal
+	function isValidId(id) {
+		return typeof id === 'string' && id.length > 0 && id.length < 200 && /^[a-zA-Z0-9_-]+$/.test(id);
 	}
 
 	window.addEventListener('message', async (event) => {
 		if (event.source !== window) return;
+		if (event.origin !== 'https://claude.ai') return;
 		const data = event.data;
 		if (!data || data.cc !== CC_MARKER) return;
 		if (data.type !== 'cc:request') return;
 
 		const { requestId, kind, payload } = data;
+
+		// Security: validate request kind
+		const VALID_KINDS = new Set(['hash', 'usage', 'conversation']);
+		if (!VALID_KINDS.has(kind)) {
+			postResponse(requestId, false, null, 'Unknown request kind');
+			return;
+		}
 		try {
 			if (kind === 'hash') {
 				const text = typeof payload?.text === 'string' ? payload.text : '';
@@ -150,7 +200,7 @@
 
 			if (kind === 'usage') {
 				const orgId = payload?.orgId;
-				if (!orgId) throw new Error('Missing orgId');
+				if (!orgId || !isValidId(orgId)) throw new Error('Invalid orgId');
 				const res = await originalFetch(`https://claude.ai/api/organizations/${orgId}/usage`, {
 					method: 'GET',
 					credentials: 'include'
@@ -163,7 +213,7 @@
 			if (kind === 'conversation') {
 				const orgId = payload?.orgId;
 				const conversationId = payload?.conversationId;
-				if (!orgId || !conversationId) throw new Error('Missing orgId/conversationId');
+				if (!orgId || !isValidId(orgId) || !conversationId || !isValidId(conversationId)) throw new Error('Invalid orgId/conversationId');
 
 				const url = `https://claude.ai/api/organizations/${orgId}/chat_conversations/${conversationId}?tree=true&rendering_mode=messages&render_all_tools=true`;
 				const res = await originalFetch(url, {
@@ -171,7 +221,21 @@
 					credentials: 'include'
 				});
 				const json = await res.json();
-				post('cc:conversation', { orgId, conversationId, data: json });
+				// Security: only pass fields needed for token counting
+				const minimal = {
+					chat_messages: Array.isArray(json?.chat_messages) ? json.chat_messages.map(m => ({
+						uuid: m?.uuid,
+						parent_message_uuid: m?.parent_message_uuid,
+						sender: m?.sender,
+						created_at: m?.created_at,
+						content: m?.content,
+						attachments: Array.isArray(m?.attachments) ? m.attachments.map(a => ({
+							extracted_content: a?.extracted_content
+						})) : undefined
+					})) : [],
+					current_leaf_message_uuid: json?.current_leaf_message_uuid
+				};
+				post('cc:conversation', { orgId, conversationId, data: minimal });
 				postResponse(requestId, true, json, null);
 				return;
 			}

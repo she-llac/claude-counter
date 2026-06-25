@@ -18,6 +18,7 @@
 
 			window.addEventListener('message', (event) => {
 				if (event.source !== window) return;
+				if (event.origin !== 'https://claude.ai') return;
 				const data = event.data;
 				if (!data || data.cc !== 'ClaudeCounter') return;
 
@@ -68,7 +69,7 @@
 						kind,
 						payload
 					},
-					'*'
+					'https://claude.ai'
 				);
 			});
 		}

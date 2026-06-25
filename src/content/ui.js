@@ -88,11 +88,14 @@
 		});
 	}
 
+	const tooltipElements = []; // Track for cleanup
+
 	function makeTooltip(text) {
 		const tip = document.createElement('div');
-		tip.className = 'bg-bg-500 text-text-000 cc-tooltip';
+		tip.className = 'cc-tooltip';
 		tip.textContent = text;
 		document.body.appendChild(tip);
+		tooltipElements.push(tip);
 		return tip;
 	}
 
@@ -126,13 +129,23 @@
 			this.refreshingUsage = false;
 
 			this.domObserver = null;
+			this._debounceTimer = null;
+			this._floatingContainer = null;
+			this._themeObserver = null;
+			this._contextLimit = CC.CONST.DEFAULT_CONTEXT_LIMIT;
 		}
 
 		getProgressChrome() {
-			const root = document.documentElement;
-			const modeDark = root.dataset?.mode === 'dark';
-			const modeLight = root.dataset?.mode === 'light';
-			const isDark = modeDark && !modeLight;
+			// Use DOMDiscovery for theme detection when available
+			let isDark;
+			if (CC.DOMDiscovery?.sampleTheme) {
+				isDark = CC.DOMDiscovery.sampleTheme().isDark;
+			} else {
+				const root = document.documentElement;
+				const modeDark = root.dataset?.mode === 'dark';
+				const modeLight = root.dataset?.mode === 'light';
+				isDark = modeDark && !modeLight;
+			}
 
 			return {
 				strokeColor: isDark ? CC.COLORS.PROGRESS_OUTLINE_DARK : CC.COLORS.PROGRESS_OUTLINE_LIGHT,
@@ -159,9 +172,8 @@
 		}
 
 		initialize() {
-			// Header container (tokens + cache timer)
 			this.headerContainer = document.createElement('div');
-			this.headerContainer.className = 'text-text-500 text-xs !px-1 cc-header';
+			this.headerContainer.className = 'cc-header';
 
 			this.headerDisplay = document.createElement('span');
 			this.headerDisplay.className = 'cc-headerItem';
@@ -184,42 +196,37 @@
 
 		_observeTheme() {
 			// Watch for theme changes (data-mode attribute on <html>)
-			const observer = new MutationObserver(() => this.refreshProgressChrome());
-			observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-mode'] });
+			this._themeObserver = new MutationObserver(() => this.refreshProgressChrome());
+			this._themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-mode', 'class', 'style'] });
 		}
 
 		_observeDom() {
-			// Track pending reattach attempts independently
-			let usageReattachPending = false;
-			let headerReattachPending = false;
+			let reattachPending = false;
 
 			this.domObserver = new MutationObserver(() => {
-				const usageMissing = this.usageLine && !document.contains(this.usageLine);
-				const headerMissing = !document.contains(this.headerContainer);
+				// Performance: debounce — wait for DOM to settle (250ms)
+				clearTimeout(this._debounceTimer);
+				this._debounceTimer = setTimeout(() => {
+					const usageMissing = this.usageLine && !document.contains(this.usageLine);
+					const headerMissing = this.headerContainer && !document.contains(this.headerContainer);
 
-				if (usageMissing && !usageReattachPending) {
-					usageReattachPending = true;
-					CC.waitForElement(CC.DOM.MODEL_SELECTOR_DROPDOWN, 60000).then((el) => {
-						usageReattachPending = false;
-						if (el) this.attachUsageLine();
-					});
-				}
-
-				if (headerMissing && !headerReattachPending) {
-					headerReattachPending = true;
-					CC.waitForElement(CC.DOM.CHAT_MENU_TRIGGER, 60000).then((el) => {
-						headerReattachPending = false;
-						if (el) this.attachHeader();
-					});
-				}
+					if ((usageMissing || headerMissing) && !reattachPending) {
+						reattachPending = true;
+						// Use discovery engine instead of dead selectors
+						requestAnimationFrame(() => {
+							reattachPending = false;
+							if (usageMissing) this.attachUsageLine();
+							if (headerMissing) this.attachHeader();
+						});
+					}
+				}, 250);
 			});
 			this.domObserver.observe(document.body, { childList: true, subtree: true });
 		}
 
 		_initUsageLine() {
 			this.usageLine = document.createElement('div');
-			this.usageLine.className =
-				'text-text-400 text-[11px] cc-usageRow cc-hidden flex flex-row items-center gap-3 w-full';
+			this.usageLine.className = 'cc-usageRow cc-hidden';
 
 			this.sessionUsageSpan = document.createElement('span');
 			this.sessionUsageSpan.className = 'cc-usageText';
@@ -276,9 +283,8 @@
 		}
 
 		_setupTooltips() {
-			this.lengthTooltip = makeTooltip(
-				"Approximate tokens (excludes system prompt).\nUses a generic tokenizer, may differ from Claude's count.\nBecomes invalid after context compaction.\nBar scale: 200k tokens (Claude's maximum context length, will compact before then)."
-			);
+			this.lengthTooltip = makeTooltip('');
+			this._updateLengthTooltip(); // Set initial text
 			setupTooltip(
 				this.lengthGroup,
 				this.lengthTooltip,
@@ -304,55 +310,141 @@
 			);
 		}
 
+		/**
+		 * Set the context limit for the token bar (model-aware).
+		 */
+		setContextLimit(limit) {
+			if (typeof limit === 'number' && limit > 0) {
+				this._contextLimit = limit;
+				this._updateLengthTooltip();
+			}
+		}
+
+		/**
+		 * Update the token tooltip text with the current model's context limit.
+		 */
+		_updateLengthTooltip() {
+			if (!this.lengthTooltip) return;
+			const limitStr = this._contextLimit >= 1_000_000
+				? `${(this._contextLimit / 1_000_000).toFixed(0)}M`
+				: `${(this._contextLimit / 1_000).toFixed(0)}k`;
+			this.lengthTooltip.textContent =
+				`Approximate tokens (excludes system prompt).\n` +
+				`Uses a generic tokenizer, may differ from Claude's count.\n` +
+				`Becomes invalid after context compaction.\n` +
+				`Bar scale: ${limitStr} tokens (context window).`;
+		}
+
+		/**
+		 * Create or update the floating widget (top-right fallback).
+		 */
+		_attachFloating() {
+			if (this._floatingContainer && document.contains(this._floatingContainer)) return;
+
+			const floating = document.createElement('div');
+			floating.className = 'cc-floating';
+
+			// Toggle button
+			const toggle = document.createElement('button');
+			toggle.className = 'cc-floating__toggle';
+			toggle.textContent = '◀';
+			toggle.title = 'Toggle Claude Counter';
+			toggle.addEventListener('click', () => {
+				floating.classList.toggle('cc-floating--collapsed');
+				toggle.textContent = floating.classList.contains('cc-floating--collapsed') ? '▶' : '◀';
+			});
+			floating.appendChild(toggle);
+
+			// Add header and usage line into floating container
+			floating.appendChild(this.headerContainer);
+			floating.appendChild(this.usageLine);
+
+			document.body.appendChild(floating);
+			this._floatingContainer = floating;
+
+			this._renderHeader();
+			this.refreshProgressChrome();
+			CC.log('Floating UI attached (top-right)');
+		}
+
+		/**
+		 * Cleanup all resources — observers, timers, tooltips.
+		 */
+		destroy() {
+			this.domObserver?.disconnect();
+			this._themeObserver?.disconnect();
+			clearTimeout(this._debounceTimer);
+
+			// Remove floating container
+			this._floatingContainer?.remove();
+
+			// Remove all tooltips from document.body
+			for (const tip of tooltipElements) {
+				tip?.remove();
+			}
+			tooltipElements.length = 0;
+		}
+
 		attach() {
-			this.attachHeader();
+			// Attach usage first (it finds the toolbar reliably), then header above it
 			this.attachUsageLine();
+			this.attachHeader();
 			this.refreshProgressChrome();
 		}
 
 		attachHeader() {
-			const chatMenu = document.querySelector(CC.DOM.CHAT_MENU_TRIGGER);
-			if (!chatMenu) return;
-			const anchor = chatMenu.closest(CC.DOM.CHAT_PROJECT_WRAPPER) || chatMenu.parentElement;
-			if (!anchor) return;
-			if (anchor.nextElementSibling !== this.headerContainer) {
-				anchor.after(this.headerContainer);
+			// Strategy: place header ABOVE the usage line (near input area).
+			// Both elements should be in the same visual zone.
+
+			// If usage line is already in the DOM, put header right before it
+			if (this.usageLine && document.contains(this.usageLine)) {
+				if (this.usageLine.previousElementSibling !== this.headerContainer) {
+					this.usageLine.before(this.headerContainer);
+				}
+				this._renderHeader();
+				this.refreshProgressChrome();
+				CC.status.headerOk = true;
+				CC.log('Header attached above usage line');
+				return;
 			}
-			this._renderHeader();
-			this.refreshProgressChrome();
+
+			// If usage line isn't attached yet, try the toolbar directly
+			const result = CC.DOMDiscovery ? CC.DOMDiscovery.findUsageAnchor() : null;
+			if (result && result.confidence !== 'low') {
+				result.element.after(this.headerContainer);
+				this._renderHeader();
+				this.refreshProgressChrome();
+				CC.status.headerOk = true;
+				CC.log('Header attached via', result.method);
+				return;
+			}
+
+			// Last resort: floating
+			this._attachFloating();
+			CC.status.headerOk = true;
 		}
 
 		attachUsageLine() {
 			if (!this.usageLine) return;
-			const modelSelector = document.querySelector(CC.DOM.MODEL_SELECTOR_DROPDOWN);
-			if (!modelSelector) return;
-			const gridContainer = modelSelector.closest('[data-testid="chat-input-grid-container"]');
-			const gridArea = modelSelector.closest('[data-testid="chat-input-grid-area"]');
-			const findToolbarRow = (el, stopAt) => {
-				let cur = el;
-				while (cur && cur !== document.body) {
-					if (stopAt && cur === stopAt) break;
-					if (cur !== el && cur.nodeType === 1) {
-						const style = window.getComputedStyle(cur);
-						if (style.display === 'flex' && style.flexDirection === 'row') {
-							const buttons = cur.querySelectorAll('button').length;
-							if (buttons > 1) return cur;
-						}
-					}
-					cur = cur.parentElement;
-				}
-				return null;
-			};
 
-			const toolbarRow =
-				(gridContainer ? findToolbarRow(modelSelector, gridArea || gridContainer) : null) ||
-				findToolbarRow(modelSelector) ||
-				modelSelector.parentElement?.parentElement?.parentElement;
-			if (!toolbarRow) return;
-			if (toolbarRow.nextElementSibling !== this.usageLine) {
+			// Use discovery engine for usage anchor
+			const result = CC.DOMDiscovery ? CC.DOMDiscovery.findUsageAnchor() : null;
+			if (!result) return;
+
+			if (result.confidence === 'low') {
+				// Floating mode handles everything
+				this._attachFloating();
+				CC.status.usageOk = true;
+				return;
+			}
+
+			const toolbarRow = result.element;
+			if (toolbarRow && toolbarRow.nextElementSibling !== this.usageLine) {
 				toolbarRow.after(this.usageLine);
 			}
 			this.refreshProgressChrome();
+			CC.status.usageOk = true;
+			CC.log('Usage line attached via', result.method);
 		}
 
 		setPendingCache(pending) {
@@ -378,7 +470,7 @@
 				return;
 			}
 
-			const pct = Math.max(0, Math.min(100, (totalTokens / CC.CONST.CONTEXT_LIMIT_TOKENS) * 100));
+			const pct = Math.max(0, Math.min(100, (totalTokens / this._contextLimit) * 100));
 			this.lengthDisplay.textContent = `~${totalTokens.toLocaleString()} tokens`;
 
 			// Mini bar (hide when full - context is definitely compacted by then)
@@ -403,7 +495,7 @@
 				this.refreshProgressChrome();
 
 				const barContainer = document.createElement('span');
-				barContainer.className = 'inline-flex items-center';
+				barContainer.className = 'cc-barContainer';
 				barContainer.appendChild(bar);
 
 				this.lengthGroup.replaceChildren(this.lengthDisplay, document.createTextNode('\u00A0\u00A0'), barContainer);
@@ -576,4 +668,7 @@
 	CC.ui = {
 		CounterUI
 	};
+
+	// Expose tooltip cleanup for destroy()
+	CC._tooltipElements = tooltipElements;
 })();

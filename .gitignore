@@ -1,1 +1,28 @@
+# OS files
 .DS_Store
+Thumbs.db
+Desktop.ini
+
+# Dependencies
+node_modules/
+
+# Environment / secrets
+.env
+.env.*
+*.key
+*.pem
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Build artifacts
+dist/
+*.zip
+*.xpi
+*.crx
+
+# Logs
+*.log

@@ -3,7 +3,7 @@
 
 	const CC = (globalThis.ClaudeCounter = globalThis.ClaudeCounter || {});
 
-	const ROOT_MESSAGE_ID = '00000000-0000-4000-8000-000000000000';
+	const ROOT_MESSAGE_ID = CC.CONST.ROOT_MESSAGE_ID;
 
 	function stableStringify(value) {
 		const seen = new WeakSet();
@@ -30,7 +30,12 @@
 	}
 
 	function getTokenizer() {
-		return globalThis.GPTTokenizer_o200k_base || null;
+		const tok = globalThis.GPTTokenizer_o200k_base;
+		if (!tok?.countTokens) {
+			CC.log('Tokenizer not loaded — token counts unavailable');
+			return null;
+		}
+		return tok;
 	}
 
 	function countTokens(text) {
@@ -132,15 +137,15 @@
 		return parts.join('\n');
 	}
 
+	// Security: hash directly via crypto.subtle — no user text through postMessage
 	async function hashString(str) {
-		if (!CC.bridge?.requestHash) return null;
 		try {
-			const res = await CC.bridge.requestHash(str);
-			if (res?.hash) return res.hash;
+			const buffer = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+			const bytes = new Uint8Array(buffer);
+			return Array.from(bytes.slice(0, 8), (b) => b.toString(16).padStart(2, '0')).join('');
 		} catch {
-			// No local hashing fallback.
+			return null;
 		}
-		return null;
 	}
 
 	async function fingerprint(text) {
