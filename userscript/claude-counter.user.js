@@ -429,13 +429,11 @@
 		if (!timestampMs) return '';
 		try {
 			const date = new Date(timestampMs);
-			const options = {
+			const timeStr = date.toLocaleTimeString([], {
 				hour: 'numeric',
 				minute: '2-digit',
-				hour12: true,
-				timeZoneName: 'short'
-			};
-			const timeStr = date.toLocaleTimeString([], options);
+				hour12: true
+			});
 
 			const now = new Date();
 			const isToday = date.getDate() === now.getDate() &&
@@ -443,19 +441,33 @@
 				date.getFullYear() === now.getFullYear();
 
 			if (isToday) {
-				return `at ${timeStr}`;
+				return `@ ${timeStr}`;
 			} else {
-				const dayOptions = {
+				const dayStr = date.toLocaleDateString([], {
 					weekday: 'short',
 					month: 'short',
-					day: 'numeric',
-					hour: 'numeric',
-					minute: '2-digit',
-					hour12: true,
-					timeZoneName: 'short'
-				};
-				return `on ${date.toLocaleDateString([], dayOptions)}`;
+					day: 'numeric'
+				});
+				return `on ${dayStr}, ${timeStr}`;
 			}
+		} catch {
+			return '';
+		}
+	}
+
+	function getFullLocalResetString(timestampMs) {
+		if (!timestampMs) return '';
+		try {
+			const date = new Date(timestampMs);
+			return date.toLocaleString([], {
+				weekday: 'long',
+				year: 'numeric',
+				month: 'long',
+				day: 'numeric',
+				hour: 'numeric',
+				minute: '2-digit',
+				timeZoneName: 'long'
+			});
 		} catch {
 			return '';
 		}
@@ -554,6 +566,15 @@
 			this.refreshingUsage = false;
 
 			this.domObserver = null;
+			this.sessionTooltip = null;
+			this.weeklyTooltip = null;
+			this.lastUsage = null;
+			try {
+				const val = localStorage.getItem('cc-show-local-time');
+				this.showLocalTime = val !== null ? val === 'true' : true;
+			} catch {
+				this.showLocalTime = true;
+			}
 		}
 
 		getProgressChrome() {
@@ -699,6 +720,19 @@
 
 			this.refreshProgressChrome();
 
+			const handleTimeClick = (e) => {
+				e.stopPropagation();
+				this.showLocalTime = !this.showLocalTime;
+				try {
+					localStorage.setItem('cc-show-local-time', this.showLocalTime);
+				} catch {}
+				if (this.lastUsage) {
+					this.setUsage(this.lastUsage);
+				}
+			};
+			this.sessionUsageSpan.addEventListener('click', handleTimeClick);
+			this.weeklyUsageSpan.addEventListener('click', handleTimeClick);
+
 			this.usageLine.addEventListener('click', async () => {
 				if (!this.onUsageRefresh || this.refreshingUsage) return;
 				this.refreshingUsage = true;
@@ -728,15 +762,17 @@
 				{ topOffset: 8 }
 			);
 
+			this.sessionTooltip = makeTooltip("5-hour session window.\nThe bar shows your usage.\nThe line marks where you are in the window.");
 			setupTooltip(
 				this.sessionGroup,
-				makeTooltip("5-hour session window.\nThe bar shows your usage.\nThe line marks where you are in the window."),
+				this.sessionTooltip,
 				{ topOffset: 8 }
 			);
 
+			this.weeklyTooltip = makeTooltip("7-day usage window.\nThe bar shows your usage.\nThe line marks where you are in the window.");
 			setupTooltip(
 				this.weeklyGroup,
-				makeTooltip("7-day usage window.\nThe bar shows your usage.\nThe line marks where you are in the window."),
+				this.weeklyTooltip,
 				{ topOffset: 8 }
 			);
 		}
@@ -929,6 +965,7 @@
 		}
 
 		setUsage(usage) {
+			this.lastUsage = usage;
 			this.refreshProgressChrome();
 			const session = usage?.five_hour || null;
 			const weekly = usage?.seven_day || null;
@@ -941,9 +978,16 @@
 				const pct = Math.round(rawPct * 10) / 10;
 				this.sessionResetMs = session.resets_at ? Date.parse(session.resets_at) : null;
 				this.sessionWindowStartMs = this.sessionResetMs ? this.sessionResetMs - 5 * 60 * 60 * 1000 : null;
-				const localTime = formatLocalTime(this.sessionResetMs);
-				const localSuffix = localTime ? ` (${localTime})` : '';
-				const resetText = this.sessionResetMs ? ` · resets in ${formatResetCountdown(this.sessionResetMs)}${localSuffix}` : '';
+				
+				let resetText = '';
+				if (this.sessionResetMs) {
+					if (this.showLocalTime) {
+						const localTime = formatLocalTime(this.sessionResetMs);
+						resetText = localTime ? ` · resets ${localTime}` : '';
+					} else {
+						resetText = ` · resets in ${formatResetCountdown(this.sessionResetMs)}`;
+					}
+				}
 				this.sessionUsageSpan.textContent = `Session: ${pct}%${resetText}`;
 
 				const width = Math.max(0, Math.min(100, rawPct));
@@ -970,9 +1014,16 @@
 				const pct = Math.round(rawPct * 10) / 10;
 				this.weeklyResetMs = weekly.resets_at ? Date.parse(weekly.resets_at) : null;
 				this.weeklyWindowStartMs = this.weeklyResetMs ? this.weeklyResetMs - 7 * 24 * 60 * 60 * 1000 : null;
-				const localTime = formatLocalTime(this.weeklyResetMs);
-				const localSuffix = localTime ? ` (${localTime})` : '';
-				const resetText = this.weeklyResetMs ? ` · resets in ${formatResetCountdown(this.weeklyResetMs)}${localSuffix}` : '';
+
+				let resetText = '';
+				if (this.weeklyResetMs) {
+					if (this.showLocalTime) {
+						const localTime = formatLocalTime(this.weeklyResetMs);
+						resetText = localTime ? ` · resets ${localTime}` : '';
+					} else {
+						resetText = ` · resets in ${formatResetCountdown(this.weeklyResetMs)}`;
+					}
+				}
 				this.weeklyUsageSpan.textContent = `Weekly: ${pct}%${resetText}`;
 
 				const width = Math.max(0, Math.min(100, rawPct));
@@ -988,6 +1039,7 @@
 			}
 
 			this._updateMarkers();
+			this._updateTooltips();
 		}
 
 		_updateMarkers() {
@@ -1016,6 +1068,19 @@
 			}
 		}
 
+		_updateTooltips() {
+			if (this.sessionTooltip) {
+				const base = "5-hour session window.\nThe bar shows your usage.\nThe line marks where you are in the window.";
+				const fullTime = this.sessionResetMs ? getFullLocalResetString(this.sessionResetMs) : '';
+				this.sessionTooltip.textContent = fullTime ? `${base}\n\nNext session starts:\n${fullTime}` : base;
+			}
+			if (this.weeklyTooltip) {
+				const base = "7-day usage window.\nThe bar shows your usage.\nThe line marks where you are in the window.";
+				const fullTime = this.weeklyResetMs ? getFullLocalResetString(this.weeklyResetMs) : '';
+				this.weeklyTooltip.textContent = fullTime ? `${base}\n\nNext session starts:\n${fullTime}` : base;
+			}
+		}
+
 		tick() {
 			// Cache countdown
 			const now = Date.now();
@@ -1034,26 +1099,37 @@
 
 			// Reset countdown text + time markers
 			if (this.sessionResetMs && this.sessionUsageSpan?.textContent) {
-				const idx = this.sessionUsageSpan.textContent.indexOf('· resets in');
+				const idx = this.sessionUsageSpan.textContent.indexOf('· resets');
 				if (idx !== -1) {
-					const prefix = this.sessionUsageSpan.textContent.slice(0, idx + '· resets in '.length);
-					const localTime = formatLocalTime(this.sessionResetMs);
-					const localSuffix = localTime ? ` (${localTime})` : '';
-					this.sessionUsageSpan.textContent = `${prefix}${formatResetCountdown(this.sessionResetMs)}${localSuffix}`;
+					const prefix = this.sessionUsageSpan.textContent.slice(0, idx + '· resets'.length);
+					let suffix = '';
+					if (this.showLocalTime) {
+						const localTime = formatLocalTime(this.sessionResetMs);
+						suffix = localTime ? ` ${localTime}` : '';
+					} else {
+						suffix = ` in ${formatResetCountdown(this.sessionResetMs)}`;
+					}
+					this.sessionUsageSpan.textContent = `${prefix}${suffix}`;
 				}
 			}
 
 			if (this.weeklyResetMs && this.weeklyUsageSpan?.textContent) {
-				const idx = this.weeklyUsageSpan.textContent.indexOf('· resets in');
+				const idx = this.weeklyUsageSpan.textContent.indexOf('· resets');
 				if (idx !== -1) {
-					const prefix = this.weeklyUsageSpan.textContent.slice(0, idx + '· resets in '.length);
-					const localTime = formatLocalTime(this.weeklyResetMs);
-					const localSuffix = localTime ? ` (${localTime})` : '';
-					this.weeklyUsageSpan.textContent = `${prefix}${formatResetCountdown(this.weeklyResetMs)}${localSuffix}`;
+					const prefix = this.weeklyUsageSpan.textContent.slice(0, idx + '· resets'.length);
+					let suffix = '';
+					if (this.showLocalTime) {
+						const localTime = formatLocalTime(this.weeklyResetMs);
+						suffix = localTime ? ` ${localTime}` : '';
+					} else {
+						suffix = ` in ${formatResetCountdown(this.weeklyResetMs)}`;
+					}
+					this.weeklyUsageSpan.textContent = `${prefix}${suffix}`;
 				}
 			}
 
 			this._updateMarkers();
+			this._updateTooltips();
 		}
 	}
 
@@ -1071,7 +1147,7 @@
 	CC.__ccUserscriptStarted = true;
 
 	const STYLE_ID = 'cc-userscript-styles';
-	const STYLES = '/* Header: tokens + cache timer */\n.cc-header {\n\tmargin-top: 2px;\n\tuser-select: none;\n}\n\n.cc-headerItem {\n\twhite-space: nowrap;\n}\n\n/* Usage row: session + weekly */\n.cc-usageRow {\n\tposition: relative;\n\tz-index: 50;\n\tcursor: pointer;\n\tuser-select: none;\n\ttransition: opacity 150ms ease;\n}\n\n.cc-usageRow--dim {\n\topacity: 0.6;\n}\n\n.cc-usageGroup {\n\tdisplay: flex;\n\talign-items: center;\n\tgap: 8px;\n\tflex: 1;\n\tmin-width: 0;\n}\n\n.cc-usageGroup--single {\n\twidth: 100%;\n}\n\n.cc-usageGroup--weekly {\n\tjustify-content: flex-end;\n}\n\n.cc-usageText {\n\twhite-space: nowrap;\n}\n\n/* Bars (mini + usage) */\n.cc-bar {\n\t--cc-radius: 3px;\n\t--cc-stroke: transparent;\n\t--cc-fill: transparent;\n\t--cc-fill-warn: var(--cc-fill);\n\t--cc-marker: transparent;\n\n\tposition: relative;\n\tbox-sizing: border-box;\n\twidth: 100%;\n\theight: 6px;\n\tborder-radius: var(--cc-radius);\n\tborder: 1px solid var(--cc-stroke);\n\toverflow: visible;\n\tuser-select: none;\n}\n\n.cc-bar__fill {\n\twidth: 0%;\n\theight: 100%;\n\tbackground: var(--cc-fill);\n\ttransition: width 300ms ease, background-color 300ms ease;\n\tborder-top-left-radius: max(0px, calc(var(--cc-radius) - 1px));\n\tborder-bottom-left-radius: max(0px, calc(var(--cc-radius) - 1px));\n\tborder-top-right-radius: 0;\n\tborder-bottom-right-radius: 0;\n}\n\n.cc-bar__fill.cc-full {\n\tborder-top-right-radius: max(0px, calc(var(--cc-radius) - 1px));\n\tborder-bottom-right-radius: max(0px, calc(var(--cc-radius) - 1px));\n}\n\n.cc-bar__fill.cc-warn {\n\tbackground: var(--cc-fill-warn);\n}\n\n.cc-bar__marker {\n\tposition: absolute;\n\ttop: 0;\n\tbottom: 0;\n\tleft: 0%;\n\twidth: 2px;\n\tbackground: var(--cc-marker);\n\tpointer-events: none;\n}\n\n.cc-bar--mini {\n\twidth: 60px;\n\theight: 7px;\n\t--cc-radius: 2px;\n}\n\n.cc-bar--usage {\n\theight: 10px;\n\tflex: 1;\n}\n\n/* Tooltips */\n.cc-tooltip {\n\tposition: fixed;\n\tz-index: 9999;\n\tpadding: 4px 8px;\n\tborder-radius: 4px;\n\tfont-size: 12px;\n\twhite-space: pre-line;\n\tuser-select: none;\n\tpointer-events: none;\n\topacity: 0;\n\ttransition: opacity 200ms ease;\n}\n\n.cc-tooltipTrigger {\n\t-webkit-touch-callout: none;\n\t-webkit-user-select: none;\n\tuser-select: none;\n\tcursor: help;\n}\n\n/* Hide optional elements completely (no layout space) */\n.cc-hidden {\n\tdisplay: none !important;\n}\n';
+	const STYLES = '/* Header: tokens + cache timer */\n.cc-header {\n\tdisplay: inline-flex;\n\talign-items: center;\n\tmargin: 6px 12px;\n\tpadding: 4px 8px;\n\tbackground: rgba(128, 128, 128, 0.05);\n\tborder: 1px solid rgba(128, 128, 128, 0.1);\n\tborder-radius: 6px;\n\tfont-size: 11px;\n\tuser-select: none;\n}\n\n.cc-headerItem {\n\twhite-space: nowrap;\n}\n\n/* Usage row: session + weekly */\n.cc-usageRow {\n\tgrid-column: 1 / -1;\n\twidth: 100%;\n\tdisplay: flex;\n\tflex-direction: row;\n\talign-items: center;\n\tgap: 12px;\n\tmargin-top: 6px;\n\tposition: relative;\n\tz-index: 50;\n\tcursor: pointer;\n\tuser-select: none;\n\ttransition: opacity 150ms ease;\n}\n\n.cc-usageRow--dim {\n\topacity: 0.6;\n}\n\n/* Row group layout */\n.cc-usageGroup {\n\tdisplay: flex;\n\talign-items: center;\n\tgap: 8px;\n\tflex: 1;\n\tmin-width: 0;\n}\n\n.cc-usageGroup--single {\n\twidth: 100%;\n}\n\n.cc-usageGroup--weekly {\n\tjustify-content: flex-end;\n}\n\n.cc-usageText {\n\twhite-space: nowrap;\n\tcursor: pointer;\n}\n\n.cc-usageText:hover {\n\ttext-decoration: underline;\n}\n\n/* Bars (mini + usage) */\n.cc-bar {\n\t--cc-radius: 3px;\n\t--cc-stroke: transparent;\n\t--cc-fill: transparent;\n\t--cc-fill-warn: var(--cc-fill);\n\t--cc-marker: transparent;\n\n\tposition: relative;\n\tbox-sizing: border-box;\n\twidth: 100%;\n\theight: 6px;\n\tborder-radius: var(--cc-radius);\n\tborder: 1px solid var(--cc-stroke);\n\toverflow: visible;\n\tuser-select: none;\n}\n\n.cc-bar__fill {\n\twidth: 0%;\n\theight: 100%;\n\tbackground: var(--cc-fill);\n\ttransition: width 300ms ease, background-color 300ms ease;\n\tborder-top-left-radius: max(0px, calc(var(--cc-radius) - 1px));\n\tborder-bottom-left-radius: max(0px, calc(var(--cc-radius) - 1px));\n\tborder-top-right-radius: 0;\n\tborder-bottom-right-radius: 0;\n}\n\n.cc-bar__fill.cc-full {\n\tborder-top-right-radius: max(0px, calc(var(--cc-radius) - 1px));\n\tborder-bottom-right-radius: max(0px, calc(var(--cc-radius) - 1px));\n}\n\n.cc-bar__fill.cc-warn {\n\tbackground: var(--cc-fill-warn);\n}\n\n.cc-bar__marker {\n\tposition: absolute;\n\ttop: 0;\n\tbottom: 0;\n\tleft: 0%;\n\twidth: 2px;\n\tbackground: var(--cc-marker);\n\tpointer-events: none;\n}\n\n.cc-bar--mini {\n\twidth: 60px;\n\theight: 7px;\n\t--cc-radius: 2px;\n}\n\n.cc-bar--usage {\n\theight: 10px;\n\tflex: 1;\n}\n\n/* Tooltips */\n.cc-tooltip {\n\tposition: fixed;\n\tz-index: 9999;\n\tpadding: 4px 8px;\n\tborder-radius: 4px;\n\tfont-size: 12px;\n\twhite-space: pre-line;\n\tuser-select: none;\n\tpointer-events: none;\n\topacity: 0;\n\ttransition: opacity 200ms ease;\n}\n\n.cc-tooltipTrigger {\n\t-webkit-touch-callout: none;\n\t-webkit-user-select: none;\n\tuser-select: none;\n\tcursor: help;\n}\n\n/* Hide optional elements completely (no layout space) */\n.cc-hidden {\n\tdisplay: none !important;\n}\n';
 
 	function injectStyles() {
 		if (document.getElementById(STYLE_ID)) return;

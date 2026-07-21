@@ -32,6 +32,9 @@
       "128": "icons/icon128.png"
     }
   },
+  "background": {
+    "service_worker": "src/background.js"
+  },
   "content_scripts": [
     {
       "matches": [

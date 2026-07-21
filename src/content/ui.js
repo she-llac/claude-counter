@@ -37,33 +37,30 @@
 		if (!timestampMs) return '';
 		try {
 			const date = new Date(timestampMs);
-			const options = {
+			const timeStr = date.toLocaleTimeString([], {
 				hour: 'numeric',
 				minute: '2-digit',
-				hour12: true,
-				timeZoneName: 'short'
-			};
-			const timeStr = date.toLocaleTimeString([], options);
+				hour12: true
+			});
+			return `@ ${timeStr}`;
+		} catch {
+			return '';
+		}
+	}
 
-			const now = new Date();
-			const isToday = date.getDate() === now.getDate() &&
-				date.getMonth() === now.getMonth() &&
-				date.getFullYear() === now.getFullYear();
-
-			if (isToday) {
-				return `at ${timeStr}`;
-			} else {
-				const dayOptions = {
-					weekday: 'short',
-					month: 'short',
-					day: 'numeric',
-					hour: 'numeric',
-					minute: '2-digit',
-					hour12: true,
-					timeZoneName: 'short'
-				};
-				return `on ${date.toLocaleDateString([], dayOptions)}`;
-			}
+	function getFullLocalResetString(timestampMs) {
+		if (!timestampMs) return '';
+		try {
+			const date = new Date(timestampMs);
+			return date.toLocaleString([], {
+				weekday: 'long',
+				year: 'numeric',
+				month: 'long',
+				day: 'numeric',
+				hour: 'numeric',
+				minute: '2-digit',
+				timeZoneName: 'long'
+			});
 		} catch {
 			return '';
 		}
@@ -162,6 +159,15 @@
 			this.refreshingUsage = false;
 
 			this.domObserver = null;
+			this.sessionTooltip = null;
+			this.weeklyTooltip = null;
+			this.lastUsage = null;
+			try {
+				const val = localStorage.getItem('cc-show-local-time');
+				this.showLocalTime = val !== null ? val === 'true' : true;
+			} catch {
+				this.showLocalTime = true;
+			}
 		}
 
 		getProgressChrome() {
@@ -307,6 +313,19 @@
 
 			this.refreshProgressChrome();
 
+			const handleTimeClick = (e) => {
+				e.stopPropagation();
+				this.showLocalTime = !this.showLocalTime;
+				try {
+					localStorage.setItem('cc-show-local-time', this.showLocalTime);
+				} catch {}
+				if (this.lastUsage) {
+					this.setUsage(this.lastUsage);
+				}
+			};
+			this.sessionUsageSpan.addEventListener('click', handleTimeClick);
+			this.weeklyUsageSpan.addEventListener('click', handleTimeClick);
+
 			this.usageLine.addEventListener('click', async () => {
 				if (!this.onUsageRefresh || this.refreshingUsage) return;
 				this.refreshingUsage = true;
@@ -336,15 +355,17 @@
 				{ topOffset: 8 }
 			);
 
+			this.sessionTooltip = makeTooltip("5-hour session window.\nThe bar shows your usage.\nThe line marks where you are in the window.");
 			setupTooltip(
 				this.sessionGroup,
-				makeTooltip("5-hour session window.\nThe bar shows your usage.\nThe line marks where you are in the window."),
+				this.sessionTooltip,
 				{ topOffset: 8 }
 			);
 
+			this.weeklyTooltip = makeTooltip("7-day usage window.\nThe bar shows your usage.\nThe line marks where you are in the window.");
 			setupTooltip(
 				this.weeklyGroup,
-				makeTooltip("7-day usage window.\nThe bar shows your usage.\nThe line marks where you are in the window."),
+				this.weeklyTooltip,
 				{ topOffset: 8 }
 			);
 		}
@@ -537,6 +558,7 @@
 		}
 
 		setUsage(usage) {
+			this.lastUsage = usage;
 			this.refreshProgressChrome();
 			const session = usage?.five_hour || null;
 			const weekly = usage?.seven_day || null;
@@ -549,9 +571,16 @@
 				const pct = Math.round(rawPct * 10) / 10;
 				this.sessionResetMs = session.resets_at ? Date.parse(session.resets_at) : null;
 				this.sessionWindowStartMs = this.sessionResetMs ? this.sessionResetMs - 5 * 60 * 60 * 1000 : null;
-				const localTime = formatLocalTime(this.sessionResetMs);
-				const localSuffix = localTime ? ` (${localTime})` : '';
-				const resetText = this.sessionResetMs ? ` · resets in ${formatResetCountdown(this.sessionResetMs)}${localSuffix}` : '';
+				
+				let resetText = '';
+				if (this.sessionResetMs) {
+					if (this.showLocalTime) {
+						const localTime = formatLocalTime(this.sessionResetMs);
+						resetText = localTime ? ` · resets ${localTime}` : '';
+					} else {
+						resetText = ` · resets in ${formatResetCountdown(this.sessionResetMs)}`;
+					}
+				}
 				this.sessionUsageSpan.textContent = `Session: ${pct}%${resetText}`;
 
 				const width = Math.max(0, Math.min(100, rawPct));
@@ -578,9 +607,16 @@
 				const pct = Math.round(rawPct * 10) / 10;
 				this.weeklyResetMs = weekly.resets_at ? Date.parse(weekly.resets_at) : null;
 				this.weeklyWindowStartMs = this.weeklyResetMs ? this.weeklyResetMs - 7 * 24 * 60 * 60 * 1000 : null;
-				const localTime = formatLocalTime(this.weeklyResetMs);
-				const localSuffix = localTime ? ` (${localTime})` : '';
-				const resetText = this.weeklyResetMs ? ` · resets in ${formatResetCountdown(this.weeklyResetMs)}${localSuffix}` : '';
+
+				let resetText = '';
+				if (this.weeklyResetMs) {
+					if (this.showLocalTime) {
+						const localTime = formatLocalTime(this.weeklyResetMs);
+						resetText = localTime ? ` · resets ${localTime}` : '';
+					} else {
+						resetText = ` · resets in ${formatResetCountdown(this.weeklyResetMs)}`;
+					}
+				}
 				this.weeklyUsageSpan.textContent = `Weekly: ${pct}%${resetText}`;
 
 				const width = Math.max(0, Math.min(100, rawPct));
@@ -596,6 +632,7 @@
 			}
 
 			this._updateMarkers();
+			this._updateTooltips();
 		}
 
 		_updateMarkers() {
@@ -624,6 +661,19 @@
 			}
 		}
 
+		_updateTooltips() {
+			if (this.sessionTooltip) {
+				const base = "5-hour session window.\nThe bar shows your usage.\nThe line marks where you are in the window.";
+				const fullTime = this.sessionResetMs ? getFullLocalResetString(this.sessionResetMs) : '';
+				this.sessionTooltip.textContent = fullTime ? `${base}\n\nNext session starts:\n${fullTime}` : base;
+			}
+			if (this.weeklyTooltip) {
+				const base = "7-day usage window.\nThe bar shows your usage.\nThe line marks where you are in the window.";
+				const fullTime = this.weeklyResetMs ? getFullLocalResetString(this.weeklyResetMs) : '';
+				this.weeklyTooltip.textContent = fullTime ? `${base}\n\nNext session starts:\n${fullTime}` : base;
+			}
+		}
+
 		tick() {
 			// Cache countdown
 			const now = Date.now();
@@ -642,26 +692,37 @@
 
 			// Reset countdown text + time markers
 			if (this.sessionResetMs && this.sessionUsageSpan?.textContent) {
-				const idx = this.sessionUsageSpan.textContent.indexOf('· resets in');
+				const idx = this.sessionUsageSpan.textContent.indexOf('· resets');
 				if (idx !== -1) {
-					const prefix = this.sessionUsageSpan.textContent.slice(0, idx + '· resets in '.length);
-					const localTime = formatLocalTime(this.sessionResetMs);
-					const localSuffix = localTime ? ` (${localTime})` : '';
-					this.sessionUsageSpan.textContent = `${prefix}${formatResetCountdown(this.sessionResetMs)}${localSuffix}`;
+					const prefix = this.sessionUsageSpan.textContent.slice(0, idx + '· resets'.length);
+					let suffix = '';
+					if (this.showLocalTime) {
+						const localTime = formatLocalTime(this.sessionResetMs);
+						suffix = localTime ? ` ${localTime}` : '';
+					} else {
+						suffix = ` in ${formatResetCountdown(this.sessionResetMs)}`;
+					}
+					this.sessionUsageSpan.textContent = `${prefix}${suffix}`;
 				}
 			}
 
 			if (this.weeklyResetMs && this.weeklyUsageSpan?.textContent) {
-				const idx = this.weeklyUsageSpan.textContent.indexOf('· resets in');
+				const idx = this.weeklyUsageSpan.textContent.indexOf('· resets');
 				if (idx !== -1) {
-					const prefix = this.weeklyUsageSpan.textContent.slice(0, idx + '· resets in '.length);
-					const localTime = formatLocalTime(this.weeklyResetMs);
-					const localSuffix = localTime ? ` (${localTime})` : '';
-					this.weeklyUsageSpan.textContent = `${prefix}${formatResetCountdown(this.weeklyResetMs)}${localSuffix}`;
+					const prefix = this.weeklyUsageSpan.textContent.slice(0, idx + '· resets'.length);
+					let suffix = '';
+					if (this.showLocalTime) {
+						const localTime = formatLocalTime(this.weeklyResetMs);
+						suffix = localTime ? ` ${localTime}` : '';
+					} else {
+						suffix = ` in ${formatResetCountdown(this.weeklyResetMs)}`;
+					}
+					this.weeklyUsageSpan.textContent = `${prefix}${suffix}`;
 				}
 			}
 
 			this._updateMarkers();
+			this._updateTooltips();
 		}
 	}
 

@@ -420,6 +420,13 @@
 		}
 	}
 
+	// Listen for background page request to play tiding sound when extension clicked
+	chrome.runtime.onMessage?.addListener((message) => {
+		if (message && message.action === 'play_tiding_sound') {
+			playTidingSound();
+		}
+	});
+
 	// Keep countdowns + markers updated.
 	setInterval(tick, 1000);
 })();
