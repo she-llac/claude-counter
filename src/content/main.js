@@ -6,8 +6,8 @@
 	CC.__started = true;
 
 	function getConversationId() {
-		const match = window.location.pathname.match(/\/chat\/([^/?]+)/);
-		return match ? match[1] : null;
+		const match = window.location.pathname.match(/\/(chat|code)\/([^/?]+)/);
+		return match ? match[2] : null;
 	}
 
 	function getOrgIdFromCookie() {
@@ -56,7 +56,47 @@
 		});
 	}
 
+	/**
+	 * Wait for any of the given elements to appear in the DOM using MutationObserver.
+	 * @param {string[]} selectors - Array of CSS selectors
+	 * @param {number} [timeoutMs] - Optional timeout in ms. Returns null if timeout expires.
+	 */
+	function waitForAnyElement(selectors, timeoutMs) {
+		return new Promise((resolve) => {
+			for (const selector of selectors) {
+				const existing = document.querySelector(selector);
+				if (existing) {
+					resolve(existing);
+					return;
+				}
+			}
+
+			let timeoutId;
+			const observer = new MutationObserver(() => {
+				for (const selector of selectors) {
+					const el = document.querySelector(selector);
+					if (el) {
+						if (timeoutId) clearTimeout(timeoutId);
+						observer.disconnect();
+						resolve(el);
+						return;
+					}
+				}
+			});
+
+			observer.observe(document.body, { childList: true, subtree: true });
+
+			if (timeoutMs) {
+				timeoutId = setTimeout(() => {
+					observer.disconnect();
+					resolve(null);
+				}, timeoutMs);
+			}
+		});
+	}
+
 	CC.waitForElement = waitForElement;
+	CC.waitForAnyElement = waitForAnyElement;
 
 	function observeUrlChanges(callback) {
 		let lastPath = window.location.pathname;
@@ -123,6 +163,7 @@
 
 	let usageState = null; // last snapshot
 	let usageResetMs = { five_hour: null, seven_day: null }; // cached parsed timestamps
+	let activeResetTimerMs = null; // Next future session reset timestamp
 	let lastUsageSseMs = 0;
 	let usageFetchInFlight = false;
 	let lastUsageUpdateMs = 0;
@@ -138,6 +179,43 @@
 	// Bridge must be ready before we can make requests
 	const bridgeReady = CC.injectBridgeOnce();
 
+	function playTidingSound() {
+		try {
+			const AudioContext = window.AudioContext || window.webkitAudioContext;
+			if (!AudioContext) return;
+			const audioCtx = new AudioContext();
+
+			const playNote = (frequency, startTime, duration) => {
+				const osc = audioCtx.createOscillator();
+				const gainNode = audioCtx.createGain();
+
+				osc.type = 'sine';
+				osc.frequency.setValueAtTime(frequency, startTime);
+
+				gainNode.gain.setValueAtTime(0, startTime);
+				// Fast attack
+				gainNode.gain.linearRampToValueAtTime(0.15, startTime + 0.05);
+				// Exponential decay
+				gainNode.gain.exponentialRampToValueAtTime(0.0001, startTime + duration);
+
+				osc.connect(gainNode);
+				gainNode.connect(audioCtx.destination);
+
+				osc.start(startTime);
+				osc.stop(startTime + duration);
+			};
+
+			const now = audioCtx.currentTime;
+			// A beautiful "tiding" chime (C5 -> E5 -> G5 -> C6)
+			playNote(523.25, now, 0.8);
+			playNote(659.25, now + 0.1, 0.8);
+			playNote(783.99, now + 0.2, 1.0);
+			playNote(1046.50, now + 0.3, 1.2);
+		} catch (e) {
+			console.error('Failed to play tiding sound:', e);
+		}
+	}
+
 	function applyUsageUpdate(normalized, source) {
 		if (!normalized) return;
 		const now = Date.now();
@@ -145,8 +223,16 @@
 		lastUsageUpdateMs = now;
 		if (source === 'sse') lastUsageSseMs = now;
 		// Cache parsed timestamps to avoid Date.parse() every tick
-		usageResetMs.five_hour = normalized.five_hour?.resets_at ? Date.parse(normalized.five_hour.resets_at) : null;
+		const fiveHourReset = normalized.five_hour?.resets_at ? Date.parse(normalized.five_hour.resets_at) : null;
+		usageResetMs.five_hour = fiveHourReset;
 		usageResetMs.seven_day = normalized.seven_day?.resets_at ? Date.parse(normalized.seven_day.resets_at) : null;
+
+		if (fiveHourReset && fiveHourReset > now) {
+			activeResetTimerMs = fiveHourReset;
+		} else {
+			activeResetTimerMs = null;
+		}
+
 		ui.setUsage(normalized);
 	}
 
@@ -201,9 +287,16 @@
 	}
 
 	async function handleConversationPayload({ orgId, conversationId, data }) {
-		if (!conversationId || conversationId !== currentConversationId) return;
 		updateOrgIdIfNeeded(orgId);
 		if (!data) return;
+
+		// Dynamically update currentConversationId if we are on a chat/code page
+		const path = window.location.pathname;
+		if (path.startsWith('/chat') || path.startsWith('/code')) {
+			currentConversationId = conversationId;
+		}
+
+		if (!conversationId || conversationId !== currentConversationId) return;
 
 		const metrics = await CC.tokens.computeConversationMetrics(data);
 		ui.setConversationMetrics({ totalTokens: metrics.totalTokens, cachedUntil: metrics.cachedUntil });
@@ -222,11 +315,20 @@
 		currentConversationId = getConversationId();
 
 		// Attach usage line and header independently - they have different anchor elements
-		// and CHAT_MENU_TRIGGER doesn't exist on home/new pages
-		waitForElement(CC.DOM.MODEL_SELECTOR_DROPDOWN, 60000).then((el) => {
+		// and CHAT_MENU_TRIGGER / MODEL_SELECTOR_DROPDOWN don't exist on home/new or code pages
+		waitForAnyElement([
+			CC.DOM.MODEL_SELECTOR_DROPDOWN,
+			'[data-testid="chat-input-grid-container"]',
+			'[data-testid="chat-input-grid-area"]',
+			'textarea'
+		], 60000).then((el) => {
 			if (el) ui.attachUsageLine();
 		});
-		waitForElement(CC.DOM.CHAT_MENU_TRIGGER, 60000).then((el) => {
+		waitForAnyElement([
+			CC.DOM.CHAT_MENU_TRIGGER,
+			'header',
+			'[role="banner"]'
+		], 60000).then((el) => {
 			if (el) ui.attachHeader();
 		});
 
@@ -293,6 +395,12 @@
 
 		// Refresh usage when a window ends (5h / 7d). SSE won't fire at rollover unless a message is sent.
 		const now = Date.now();
+
+		if (activeResetTimerMs && now >= activeResetTimerMs) {
+			activeResetTimerMs = null;
+			playTidingSound();
+			refreshUsage();
+		}
 
 		if (usageResetMs.five_hour && now >= usageResetMs.five_hour && rolloverHandledForResetMs.five_hour !== usageResetMs.five_hour) {
 			rolloverHandledForResetMs.five_hour = usageResetMs.five_hour;

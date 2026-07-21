@@ -33,6 +33,42 @@
 		return `${days}d ${remHours}h`;
 	}
 
+	function formatLocalTime(timestampMs) {
+		if (!timestampMs) return '';
+		try {
+			const date = new Date(timestampMs);
+			const options = {
+				hour: 'numeric',
+				minute: '2-digit',
+				hour12: true,
+				timeZoneName: 'short'
+			};
+			const timeStr = date.toLocaleTimeString([], options);
+
+			const now = new Date();
+			const isToday = date.getDate() === now.getDate() &&
+				date.getMonth() === now.getMonth() &&
+				date.getFullYear() === now.getFullYear();
+
+			if (isToday) {
+				return `at ${timeStr}`;
+			} else {
+				const dayOptions = {
+					weekday: 'short',
+					month: 'short',
+					day: 'numeric',
+					hour: 'numeric',
+					minute: '2-digit',
+					hour12: true,
+					timeZoneName: 'short'
+				};
+				return `on ${date.toLocaleDateString([], dayOptions)}`;
+			}
+		} catch {
+			return '';
+		}
+	}
+
 	function setupTooltip(element, tooltip, { topOffset = 10 } = {}) {
 		if (!element || !tooltip) return;
 		if (element.hasAttribute('data-tooltip-setup')) return;
@@ -199,7 +235,12 @@
 
 				if (usageMissing && !usageReattachPending) {
 					usageReattachPending = true;
-					CC.waitForElement(CC.DOM.MODEL_SELECTOR_DROPDOWN, 60000).then((el) => {
+					CC.waitForAnyElement([
+						CC.DOM.MODEL_SELECTOR_DROPDOWN,
+						'[data-testid="chat-input-grid-container"]',
+						'[data-testid="chat-input-grid-area"]',
+						'textarea'
+					], 60000).then((el) => {
 						usageReattachPending = false;
 						if (el) this.attachUsageLine();
 					});
@@ -207,7 +248,11 @@
 
 				if (headerMissing && !headerReattachPending) {
 					headerReattachPending = true;
-					CC.waitForElement(CC.DOM.CHAT_MENU_TRIGGER, 60000).then((el) => {
+					CC.waitForAnyElement([
+						CC.DOM.CHAT_MENU_TRIGGER,
+						'header',
+						'[role="banner"]'
+					], 60000).then((el) => {
 						headerReattachPending = false;
 						if (el) this.attachHeader();
 					});
@@ -311,9 +356,22 @@
 		}
 
 		attachHeader() {
+			let anchor = null;
 			const chatMenu = document.querySelector(CC.DOM.CHAT_MENU_TRIGGER);
-			if (!chatMenu) return;
-			const anchor = chatMenu.closest(CC.DOM.CHAT_PROJECT_WRAPPER) || chatMenu.parentElement;
+			if (chatMenu) {
+				anchor = chatMenu.closest(CC.DOM.CHAT_PROJECT_WRAPPER) || chatMenu.parentElement;
+			}
+
+			// Fallback: If chatMenu doesn't exist, we can look for other header or title wrapper elements
+			if (!anchor) {
+				const header = document.querySelector('header') || 
+				               document.querySelector('[role="banner"]') || 
+				               document.querySelector('.flex.items-center.justify-between');
+				if (header) {
+					anchor = header;
+				}
+			}
+
 			if (!anchor) return;
 			if (anchor.nextElementSibling !== this.headerContainer) {
 				anchor.after(this.headerContainer);
@@ -324,33 +382,59 @@
 
 		attachUsageLine() {
 			if (!this.usageLine) return;
+			let anchor = null;
+
+			// 1. Try model selector first
 			const modelSelector = document.querySelector(CC.DOM.MODEL_SELECTOR_DROPDOWN);
-			if (!modelSelector) return;
-			const gridContainer = modelSelector.closest('[data-testid="chat-input-grid-container"]');
-			const gridArea = modelSelector.closest('[data-testid="chat-input-grid-area"]');
-			const findToolbarRow = (el, stopAt) => {
-				let cur = el;
-				while (cur && cur !== document.body) {
-					if (stopAt && cur === stopAt) break;
-					if (cur !== el && cur.nodeType === 1) {
-						const style = window.getComputedStyle(cur);
-						if (style.display === 'flex' && style.flexDirection === 'row') {
-							const buttons = cur.querySelectorAll('button').length;
-							if (buttons > 1) return cur;
+			if (modelSelector) {
+				const gridContainer = modelSelector.closest('[data-testid="chat-input-grid-container"]');
+				const gridArea = modelSelector.closest('[data-testid="chat-input-grid-area"]');
+				const findToolbarRow = (el, stopAt) => {
+					let cur = el;
+					while (cur && cur !== document.body) {
+						if (stopAt && cur === stopAt) break;
+						if (cur !== el && cur.nodeType === 1) {
+							const style = window.getComputedStyle(cur);
+							if (style.display === 'flex' && style.flexDirection === 'row') {
+								const buttons = cur.querySelectorAll('button').length;
+								if (buttons > 1) return cur;
+							}
+						}
+						cur = cur.parentElement;
+					}
+					return null;
+				};
+
+				anchor =
+					(gridContainer ? findToolbarRow(modelSelector, gridArea || gridContainer) : null) ||
+					findToolbarRow(modelSelector) ||
+					modelSelector.parentElement?.parentElement?.parentElement;
+			}
+
+			// 2. Fallback for Claude Code / other layouts
+			if (!anchor) {
+				const inputGrid = document.querySelector('[data-testid="chat-input-grid-container"]') || 
+				                  document.querySelector('[data-testid="chat-input-grid-area"]') ||
+				                  document.querySelector('form') ||
+				                  document.querySelector('textarea')?.closest('div');
+				if (inputGrid) {
+					const buttons = inputGrid.querySelectorAll('button');
+					if (buttons.length > 0) {
+						for (const btn of buttons) {
+							const row = btn.closest('.flex-row') || btn.parentElement;
+							if (row && inputGrid.contains(row)) {
+								anchor = row;
+								break;
+							}
 						}
 					}
-					cur = cur.parentElement;
+					if (!anchor) anchor = inputGrid;
 				}
-				return null;
-			};
+			}
 
-			const toolbarRow =
-				(gridContainer ? findToolbarRow(modelSelector, gridArea || gridContainer) : null) ||
-				findToolbarRow(modelSelector) ||
-				modelSelector.parentElement?.parentElement?.parentElement;
-			if (!toolbarRow) return;
-			if (toolbarRow.nextElementSibling !== this.usageLine) {
-				toolbarRow.after(this.usageLine);
+			if (!anchor) return;
+			if (anchor.nextElementSibling !== this.usageLine) {
+				anchor.after(this.usageLine);
 			}
 			this.refreshProgressChrome();
 		}
@@ -465,7 +549,9 @@
 				const pct = Math.round(rawPct * 10) / 10;
 				this.sessionResetMs = session.resets_at ? Date.parse(session.resets_at) : null;
 				this.sessionWindowStartMs = this.sessionResetMs ? this.sessionResetMs - 5 * 60 * 60 * 1000 : null;
-				const resetText = this.sessionResetMs ? ` · resets in ${formatResetCountdown(this.sessionResetMs)}` : '';
+				const localTime = formatLocalTime(this.sessionResetMs);
+				const localSuffix = localTime ? ` (${localTime})` : '';
+				const resetText = this.sessionResetMs ? ` · resets in ${formatResetCountdown(this.sessionResetMs)}${localSuffix}` : '';
 				this.sessionUsageSpan.textContent = `Session: ${pct}%${resetText}`;
 
 				const width = Math.max(0, Math.min(100, rawPct));
@@ -492,7 +578,9 @@
 				const pct = Math.round(rawPct * 10) / 10;
 				this.weeklyResetMs = weekly.resets_at ? Date.parse(weekly.resets_at) : null;
 				this.weeklyWindowStartMs = this.weeklyResetMs ? this.weeklyResetMs - 7 * 24 * 60 * 60 * 1000 : null;
-				const resetText = this.weeklyResetMs ? ` · resets in ${formatResetCountdown(this.weeklyResetMs)}` : '';
+				const localTime = formatLocalTime(this.weeklyResetMs);
+				const localSuffix = localTime ? ` (${localTime})` : '';
+				const resetText = this.weeklyResetMs ? ` · resets in ${formatResetCountdown(this.weeklyResetMs)}${localSuffix}` : '';
 				this.weeklyUsageSpan.textContent = `Weekly: ${pct}%${resetText}`;
 
 				const width = Math.max(0, Math.min(100, rawPct));
@@ -557,7 +645,9 @@
 				const idx = this.sessionUsageSpan.textContent.indexOf('· resets in');
 				if (idx !== -1) {
 					const prefix = this.sessionUsageSpan.textContent.slice(0, idx + '· resets in '.length);
-					this.sessionUsageSpan.textContent = `${prefix}${formatResetCountdown(this.sessionResetMs)}`;
+					const localTime = formatLocalTime(this.sessionResetMs);
+					const localSuffix = localTime ? ` (${localTime})` : '';
+					this.sessionUsageSpan.textContent = `${prefix}${formatResetCountdown(this.sessionResetMs)}${localSuffix}`;
 				}
 			}
 
@@ -565,7 +655,9 @@
 				const idx = this.weeklyUsageSpan.textContent.indexOf('· resets in');
 				if (idx !== -1) {
 					const prefix = this.weeklyUsageSpan.textContent.slice(0, idx + '· resets in '.length);
-					this.weeklyUsageSpan.textContent = `${prefix}${formatResetCountdown(this.weeklyResetMs)}`;
+					const localTime = formatLocalTime(this.weeklyResetMs);
+					const localSuffix = localTime ? ` (${localTime})` : '';
+					this.weeklyUsageSpan.textContent = `${prefix}${formatResetCountdown(this.weeklyResetMs)}${localSuffix}`;
 				}
 			}
 
