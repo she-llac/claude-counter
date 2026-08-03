@@ -80,6 +80,78 @@
 		};
 	}
 
+	function normalizeModelName(rawModel) {
+		if (!rawModel || typeof rawModel !== 'string') return null;
+		const lower = rawModel.toLowerCase();
+		if (lower.includes('haiku')) return 'haiku';
+		if (lower.includes('opus')) return 'opus';
+		if (lower.includes('fable')) return 'fable';
+		if (lower.includes('sonnet')) return 'sonnet';
+		return null;
+	}
+
+	function parseOveruse(rawObj) {
+		if (!rawObj || typeof rawObj !== 'object') return null;
+		const cand = rawObj.extra_usage || rawObj.overage || rawObj.overuse || rawObj.overuse_credits || rawObj.credits || rawObj.extra_credits;
+		if (!cand || typeof cand !== 'object') return null;
+		if (cand.is_enabled === false) return null;
+
+		let utilization = null;
+		if (typeof cand.utilization === 'number' && Number.isFinite(cand.utilization)) {
+			utilization = Math.max(0, Math.min(100, cand.utilization));
+		} else if (typeof cand.used_percentage === 'number' && Number.isFinite(cand.used_percentage)) {
+			utilization = Math.max(0, Math.min(100, cand.used_percentage));
+		}
+
+		let used = cand.used_credits ?? cand.used ?? cand.spent ?? cand.amount ?? null;
+		let limit = cand.monthly_limit ?? cand.limit ?? cand.budget ?? cand.total ?? null;
+		if (utilization === null && typeof used === 'number' && typeof limit === 'number' && limit > 0) {
+			utilization = Math.max(0, Math.min(100, (used / limit) * 100));
+		}
+
+		return { utilization, used, limit, raw: cand };
+	}
+
+	function parseModelWindows(rawObj, windowKey, fallbackWin) {
+		const out = {};
+		const baseUtil =
+			rawObj[`${windowKey}_sonnet`]?.utilization ??
+			rawObj[windowKey]?.sonnet?.utilization ??
+			fallbackWin?.utilization ??
+			rawObj[`${windowKey}_opus`]?.utilization ??
+			rawObj[`${windowKey}_haiku`]?.utilization ??
+			0;
+
+		const baseResetsAt =
+			rawObj[`${windowKey}_sonnet`]?.resets_at ??
+			rawObj[windowKey]?.sonnet?.resets_at ??
+			fallbackWin?.resets_at ??
+			rawObj[`${windowKey}_opus`]?.resets_at ??
+			rawObj[`${windowKey}_haiku`]?.resets_at ??
+			null;
+
+		for (const model of (CC.MODELS || ['haiku', 'sonnet', 'opus'])) {
+			const specKey = `${windowKey}_${model}`;
+			const mult = CC.MODEL_USAGE_MULTIPLIERS?.[model] ?? 1.0;
+
+			let util = baseUtil * mult;
+			let resetsAt = baseResetsAt;
+
+			if (rawObj[specKey] && typeof rawObj[specKey].resets_at === 'string') {
+				resetsAt = rawObj[specKey].resets_at;
+			} else if (rawObj[windowKey] && typeof rawObj[windowKey][model] === 'object' && typeof rawObj[windowKey][model].resets_at === 'string') {
+				resetsAt = rawObj[windowKey][model].resets_at;
+			}
+
+			out[model] = fallbackWin || baseUtil > 0 ? {
+				utilization: Math.max(0, Math.min(100, util)),
+				resets_at: resetsAt,
+				window_hours: fallbackWin?.window_hours || 5
+			} : null;
+		}
+		return out;
+	}
+
 	function parseUsageFromUsageEndpoint(raw) {
 		if (!raw || typeof raw !== 'object') return null;
 
@@ -93,9 +165,11 @@
 
 		const fiveHour = normalizeWindow(raw.five_hour, 5);
 		const sevenDay = normalizeWindow(raw.seven_day, 24 * 7);
+		const overuse = parseOveruse(raw);
+		const models_five_hour = parseModelWindows(raw, 'five_hour', fiveHour);
 
-		if (!fiveHour && !sevenDay) return null;
-		return { five_hour: fiveHour, seven_day: sevenDay };
+		if (!fiveHour && !sevenDay && !overuse) return null;
+		return { five_hour: fiveHour, seven_day: sevenDay, overuse, models_five_hour };
 	}
 
 	function parseUsageFromMessageLimit(raw) {
@@ -113,12 +187,15 @@
 
 		const fiveHour = normalizeWindow(raw.windows['5h'], 5);
 		const sevenDay = normalizeWindow(raw.windows['7d'], 24 * 7);
+		const overuse = parseOveruse(raw);
+		const models_five_hour = parseModelWindows(raw.windows || {}, '5h', fiveHour);
 
-		if (!fiveHour && !sevenDay) return null;
-		return { five_hour: fiveHour, seven_day: sevenDay };
+		if (!fiveHour && !sevenDay && !overuse) return null;
+		return { five_hour: fiveHour, seven_day: sevenDay, overuse, models_five_hour };
 	}
 
 	let currentConversationId = null;
+	let currentConversationModel = null;
 	let currentOrgId = null;
 
 	let usageState = null; // last snapshot
@@ -127,6 +204,19 @@
 	let usageFetchInFlight = false;
 	let lastUsageUpdateMs = 0;
 	const rolloverHandledForResetMs = { five_hour: null, seven_day: null };
+
+	function detectActiveModel() {
+		if (currentConversationModel) {
+			const m = normalizeModelName(currentConversationModel);
+			if (m) return m;
+		}
+		const el = document.querySelector(CC.DOM.MODEL_SELECTOR_DROPDOWN);
+		if (el) {
+			const m = normalizeModelName(el.textContent || '');
+			if (m) return m;
+		}
+		return 'sonnet';
+	}
 
 	const ui = new CC.ui.CounterUI({
 		onUsageRefresh: async () => {
@@ -147,7 +237,10 @@
 		// Cache parsed timestamps to avoid Date.parse() every tick
 		usageResetMs.five_hour = normalized.five_hour?.resets_at ? Date.parse(normalized.five_hour.resets_at) : null;
 		usageResetMs.seven_day = normalized.seven_day?.resets_at ? Date.parse(normalized.seven_day.resets_at) : null;
-		ui.setUsage(normalized);
+
+		const isNewChat = !currentConversationId;
+		const activeModel = detectActiveModel();
+		ui.setUsage(normalized, { isNewChat, activeModel });
 	}
 
 	function updateOrgIdIfNeeded(newOrgId) {
@@ -205,6 +298,13 @@
 		updateOrgIdIfNeeded(orgId);
 		if (!data) return;
 
+		const rawModel = data.model || data.chat_messages?.[0]?.model;
+		const m = normalizeModelName(rawModel);
+		if (m) {
+			currentConversationModel = m;
+			if (usageState) applyUsageUpdate(usageState, 'conversation');
+		}
+
 		const metrics = await CC.tokens.computeConversationMetrics(data);
 		ui.setConversationMetrics({ totalTokens: metrics.totalTokens, cachedUntil: metrics.cachedUntil });
 	}
@@ -231,7 +331,9 @@
 		});
 
 		if (!currentConversationId) {
+			currentConversationModel = null;
 			ui.setConversationMetrics();
+			if (usageState) applyUsageUpdate(usageState, 'url_change');
 			return;
 		}
 
@@ -240,8 +342,12 @@
 
 		await refreshConversation();
 
-		// Usage is org-level, not conversation-level. Only fetch on first load or if stale.
-		if (!usageState) await refreshUsage();
+		// Usage is org-level, not conversation-level.
+		if (!usageState) {
+			await refreshUsage();
+		} else {
+			applyUsageUpdate(usageState, 'url_change');
+		}
 	}
 
 	const unobserveUrl = observeUrlChanges(handleUrlChange);
