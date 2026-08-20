@@ -32,11 +32,13 @@
     {
       "matches": ["https://claude.ai/*"],
       "css": ["src/styles.css"],
+      "_comment_js_order": "Load order matters. main.js consumes CC.constants, CC.bridge, CC.tokens, CC.parsers, and CC.ui, so all of those must load first. Underscore-prefixed keys are tolerated by Chrome and Firefox as developer metadata.",
       "js": [
         "src/content/constants.js",
         "src/content/bridge-client.js",
         "src/vendor/o200k_base.js",
         "src/content/tokens.js",
+        "src/content/parsers.js",
         "src/content/ui.js",
         "src/content/main.js"
       ]

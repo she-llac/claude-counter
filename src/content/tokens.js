@@ -55,8 +55,10 @@
 		if (!leaf) return [];
 
 		const trunk = [];
+		const visited = new Set();
 		let currentId = leaf;
-		while (currentId && currentId !== ROOT_MESSAGE_ID) {
+		while (currentId && currentId !== ROOT_MESSAGE_ID && !visited.has(currentId)) {
+			visited.add(currentId);
 			const msg = byId.get(currentId);
 			if (!msg) break;
 			trunk.push(msg);
