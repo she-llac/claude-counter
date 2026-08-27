@@ -147,7 +147,10 @@
 	const CC = (globalThis.ClaudeCounter = globalThis.ClaudeCounter || {});
 
 	CC.DOM = Object.freeze({
-		CHAT_MENU_TRIGGER: '[data-testid="chat-menu-trigger"]',
+		// claude.ai has dropped chat-menu-trigger in favour of chat-title-split;
+		// match either so older builds keep working.
+		CHAT_MENU_TRIGGER: '[data-testid="chat-menu-trigger"], [data-testid="chat-title-split"]',
+		CHAT_HEADER: '[data-testid="chat-header"]',
 		MODEL_SELECTOR_DROPDOWN: '[data-testid="model-selector-dropdown"]',
 		CHAT_PROJECT_WRAPPER: '.chat-project-wrapper',
 		BRIDGE_SCRIPT_ID: 'cc-bridge-script'
@@ -169,6 +172,16 @@
 		BOLD_LIGHT: '#141413',
 		BOLD_DARK: '#faf9f5'
 	});
+
+	// claude.ai renames its data-testids from time to time. When that happens every
+	// attach path just returns early and the feature vanishes with no error, which is
+	// how the token counter stayed broken unnoticed. Leave one breadcrumb per cause.
+	const warnedKeys = new Set();
+	CC.warnOnce = (key, message) => {
+		if (warnedKeys.has(key)) return;
+		warnedKeys.add(key);
+		console.warn(`[Claude Counter] ${message}`);
+	};
 })();
 
 
@@ -591,6 +604,7 @@
 					CC.waitForElement(CC.DOM.MODEL_SELECTOR_DROPDOWN, 60000).then((el) => {
 						usageReattachPending = false;
 						if (el) this.attachUsageLine();
+						else CC.warnOnce('reattach:model-selector', 'usage row lost and could not be reattached');
 					});
 				}
 
@@ -702,8 +716,28 @@
 		attachHeader() {
 			const chatMenu = document.querySelector(CC.DOM.CHAT_MENU_TRIGGER);
 			if (!chatMenu) return;
-			const anchor = chatMenu.closest(CC.DOM.CHAT_PROJECT_WRAPPER) || chatMenu.parentElement;
-			if (!anchor) return;
+
+			const headerBar = chatMenu.closest(CC.DOM.CHAT_HEADER);
+			let anchor = chatMenu.closest(CC.DOM.CHAT_PROJECT_WRAPPER);
+
+			if (!anchor && headerBar) {
+				// Climb to the title block's outermost wrapper so the counter becomes a
+				// sibling in the header bar's flex row, not a child of the truncating
+				// title wrapper.
+				anchor = chatMenu;
+				while (anchor.parentElement && anchor.parentElement !== headerBar) {
+					anchor = anchor.parentElement;
+				}
+			}
+
+			if (!anchor) anchor = chatMenu.parentElement;
+			if (!anchor || anchor === this.headerContainer) {
+				CC.warnOnce('anchor:header-bar', 'token counter not attached: no usable anchor beside the chat title');
+				return;
+			}
+
+			this.headerContainer.classList.toggle('cc-header--inHeaderBar', anchor.parentElement === headerBar);
+
 			if (anchor.nextElementSibling !== this.headerContainer) {
 				anchor.after(this.headerContainer);
 			}
@@ -717,11 +751,20 @@
 			if (!modelSelector) return;
 			const gridContainer = modelSelector.closest('[data-testid="chat-input-grid-container"]');
 			const gridArea = modelSelector.closest('[data-testid="chat-input-grid-area"]');
+
+			// An out-of-flow ancestor is never a safe anchor: inserting after it drops the
+			// usage row into the normal flow of the nearest positioned parent, on top of
+			// whatever is already there.
+			const isOutOfFlow = (el) => {
+				const position = window.getComputedStyle(el).position;
+				return position === 'absolute' || position === 'fixed';
+			};
+
 			const findToolbarRow = (el, stopAt) => {
 				let cur = el;
 				while (cur && cur !== document.body) {
 					if (stopAt && cur === stopAt) break;
-					if (cur !== el && cur.nodeType === 1) {
+					if (cur !== el && cur.nodeType === 1 && !isOutOfFlow(cur)) {
 						const style = window.getComputedStyle(cur);
 						if (style.display === 'flex' && style.flexDirection === 'row') {
 							const buttons = cur.querySelectorAll('button').length;
@@ -733,14 +776,44 @@
 				return null;
 			};
 
+			// The composer card: the nearest in-flow column stack around the input.
+			// Newer layouts pin the controls with position:absolute, so there is no
+			// toolbar row to sit under and the row becomes the card's last child.
+			const findComposerCard = (el) => {
+				let cur = el.parentElement;
+				while (cur && cur !== document.body) {
+					if (!isOutOfFlow(cur)) {
+						const style = window.getComputedStyle(cur);
+						if (style.display === 'flex' && style.flexDirection === 'column') return cur;
+					}
+					cur = cur.parentElement;
+				}
+				return null;
+			};
+
+			const composerCard = findComposerCard(modelSelector);
 			const toolbarRow =
 				(gridContainer ? findToolbarRow(modelSelector, gridArea || gridContainer) : null) ||
-				findToolbarRow(modelSelector) ||
-				modelSelector.parentElement?.parentElement?.parentElement;
-			if (!toolbarRow) return;
-			if (toolbarRow.nextElementSibling !== this.usageLine) {
-				toolbarRow.after(this.usageLine);
+				findToolbarRow(modelSelector, composerCard);
+
+			if (toolbarRow) {
+				this.usageLine.classList.remove('cc-usageRow--inComposer');
+				if (toolbarRow.nextElementSibling !== this.usageLine) {
+					toolbarRow.after(this.usageLine);
+				}
+			} else if (composerCard) {
+				this.usageLine.classList.add('cc-usageRow--inComposer');
+				if (composerCard.lastElementChild !== this.usageLine) {
+					composerCard.appendChild(this.usageLine);
+				}
+			} else {
+				CC.warnOnce(
+					'anchor:composer',
+					'usage row not attached: no in-flow toolbar row or composer column found above the model selector'
+				);
+				return;
 			}
+
 			this.refreshProgressChrome();
 		}
 
@@ -976,7 +1049,7 @@
 	CC.__ccUserscriptStarted = true;
 
 	const STYLE_ID = 'cc-userscript-styles';
-	const STYLES = '/* Header: tokens + cache timer */\n.cc-header {\n\tmargin-top: 2px;\n\tuser-select: none;\n}\n\n.cc-headerItem {\n\twhite-space: nowrap;\n}\n\n/* Usage row: session + weekly */\n.cc-usageRow {\n\tposition: relative;\n\tz-index: 50;\n\tcursor: pointer;\n\tuser-select: none;\n\ttransition: opacity 150ms ease;\n}\n\n.cc-usageRow--dim {\n\topacity: 0.6;\n}\n\n.cc-usageGroup {\n\tdisplay: flex;\n\talign-items: center;\n\tgap: 8px;\n\tflex: 1;\n\tmin-width: 0;\n}\n\n.cc-usageGroup--single {\n\twidth: 100%;\n}\n\n.cc-usageGroup--weekly {\n\tjustify-content: flex-end;\n}\n\n.cc-usageText {\n\twhite-space: nowrap;\n}\n\n/* Bars (mini + usage) */\n.cc-bar {\n\t--cc-radius: 3px;\n\t--cc-stroke: transparent;\n\t--cc-fill: transparent;\n\t--cc-fill-warn: var(--cc-fill);\n\t--cc-marker: transparent;\n\n\tposition: relative;\n\tbox-sizing: border-box;\n\twidth: 100%;\n\theight: 6px;\n\tborder-radius: var(--cc-radius);\n\tborder: 1px solid var(--cc-stroke);\n\toverflow: visible;\n\tuser-select: none;\n}\n\n.cc-bar__fill {\n\twidth: 0%;\n\theight: 100%;\n\tbackground: var(--cc-fill);\n\ttransition: width 300ms ease, background-color 300ms ease;\n\tborder-top-left-radius: max(0px, calc(var(--cc-radius) - 1px));\n\tborder-bottom-left-radius: max(0px, calc(var(--cc-radius) - 1px));\n\tborder-top-right-radius: 0;\n\tborder-bottom-right-radius: 0;\n}\n\n.cc-bar__fill.cc-full {\n\tborder-top-right-radius: max(0px, calc(var(--cc-radius) - 1px));\n\tborder-bottom-right-radius: max(0px, calc(var(--cc-radius) - 1px));\n}\n\n.cc-bar__fill.cc-warn {\n\tbackground: var(--cc-fill-warn);\n}\n\n.cc-bar__marker {\n\tposition: absolute;\n\ttop: 0;\n\tbottom: 0;\n\tleft: 0%;\n\twidth: 2px;\n\tbackground: var(--cc-marker);\n\tpointer-events: none;\n}\n\n.cc-bar--mini {\n\twidth: 60px;\n\theight: 7px;\n\t--cc-radius: 2px;\n}\n\n.cc-bar--usage {\n\theight: 10px;\n\tflex: 1;\n}\n\n/* Tooltips */\n.cc-tooltip {\n\tposition: fixed;\n\tz-index: 9999;\n\tpadding: 4px 8px;\n\tborder-radius: 4px;\n\tfont-size: 12px;\n\twhite-space: pre-line;\n\tuser-select: none;\n\tpointer-events: none;\n\topacity: 0;\n\ttransition: opacity 200ms ease;\n}\n\n.cc-tooltipTrigger {\n\t-webkit-touch-callout: none;\n\t-webkit-user-select: none;\n\tuser-select: none;\n\tcursor: help;\n}\n\n/* Hide optional elements completely (no layout space) */\n.cc-hidden {\n\tdisplay: none !important;\n}\n';
+	const STYLES = '/* Header: tokens + cache timer */\n.cc-header {\n	margin-top: 2px;\n	user-select: none;\n}\n\n.cc-header--inHeaderBar {\n	margin-top: 0;\n	flex-shrink: 0;\n}\n\n.cc-headerItem {\n	white-space: nowrap;\n}\n\n/* Usage row: session + weekly */\n.cc-usageRow {\n	position: relative;\n	z-index: 50;\n	cursor: pointer;\n	user-select: none;\n	transition: opacity 150ms ease;\n}\n\n.cc-usageRow--inComposer {\n	margin-top: 6px;\n}\n\n.cc-usageRow--dim {\n	opacity: 0.6;\n}\n\n.cc-usageGroup {\n	display: flex;\n	align-items: center;\n	gap: 8px;\n	flex: 1;\n	min-width: 0;\n}\n\n.cc-usageGroup--single {\n	width: 100%;\n}\n\n.cc-usageGroup--weekly {\n	justify-content: flex-end;\n}\n\n.cc-usageText {\n	white-space: nowrap;\n}\n\n/* Bars (mini + usage) */\n.cc-bar {\n	--cc-radius: 3px;\n	--cc-stroke: transparent;\n	--cc-fill: transparent;\n	--cc-fill-warn: var(--cc-fill);\n	--cc-marker: transparent;\n\n	position: relative;\n	box-sizing: border-box;\n	width: 100%;\n	height: 6px;\n	border-radius: var(--cc-radius);\n	border: 1px solid var(--cc-stroke);\n	overflow: visible;\n	user-select: none;\n}\n\n.cc-bar__fill {\n	width: 0%;\n	height: 100%;\n	background: var(--cc-fill);\n	transition: width 300ms ease, background-color 300ms ease;\n	border-top-left-radius: max(0px, calc(var(--cc-radius) - 1px));\n	border-bottom-left-radius: max(0px, calc(var(--cc-radius) - 1px));\n	border-top-right-radius: 0;\n	border-bottom-right-radius: 0;\n}\n\n.cc-bar__fill.cc-full {\n	border-top-right-radius: max(0px, calc(var(--cc-radius) - 1px));\n	border-bottom-right-radius: max(0px, calc(var(--cc-radius) - 1px));\n}\n\n.cc-bar__fill.cc-warn {\n	background: var(--cc-fill-warn);\n}\n\n.cc-bar__marker {\n	position: absolute;\n	top: 0;\n	bottom: 0;\n	left: 0%;\n	width: 2px;\n	background: var(--cc-marker);\n	pointer-events: none;\n}\n\n.cc-bar--mini {\n	width: 60px;\n	height: 7px;\n	--cc-radius: 2px;\n}\n\n.cc-bar--usage {\n	height: 10px;\n	flex: 1;\n}\n\n/* Tooltips */\n.cc-tooltip {\n	position: fixed;\n	z-index: 9999;\n	padding: 4px 8px;\n	border-radius: 4px;\n	font-size: 12px;\n	white-space: pre-line;\n	user-select: none;\n	pointer-events: none;\n	opacity: 0;\n	transition: opacity 200ms ease;\n}\n\n.cc-tooltipTrigger {\n	-webkit-touch-callout: none;\n	-webkit-user-select: none;\n	user-select: none;\n	cursor: help;\n}\n\n/* Hide optional elements completely (no layout space) */\n.cc-hidden {\n	display: none !important;\n}\n';
 
 	function injectStyles() {
 		if (document.getElementById(STYLE_ID)) return;
@@ -1188,20 +1261,27 @@
 
 		waitForElement(CC.DOM.MODEL_SELECTOR_DROPDOWN, 60000).then((el) => {
 			if (el) ui.attachUsageLine();
+			else CC.warnOnce('anchor:model-selector', `usage row not attached: nothing matched ${CC.DOM.MODEL_SELECTOR_DROPDOWN}`);
 		});
 		waitForElement(CC.DOM.CHAT_MENU_TRIGGER, 60000).then((el) => {
 			if (el) ui.attachHeader();
+			// The chat title legitimately does not exist on home/new, so only a
+			// conversation without one is worth reporting.
+			else if (currentConversationId) {
+				CC.warnOnce('anchor:chat-title', `token counter not attached: nothing matched ${CC.DOM.CHAT_MENU_TRIGGER}`);
+			}
 		});
-
-		if (!currentConversationId) {
-			ui.setConversationMetrics();
-			return;
-		}
 
 		updateOrgIdIfNeeded(getOrgIdFromCookie());
 
-		await refreshConversation();
+		if (currentConversationId) {
+			await refreshConversation();
+		} else {
+			ui.setConversationMetrics();
+		}
 
+		// Usage is org-level, not conversation-level, so it loads on the home and new
+		// chat pages too. Only fetch on first load or if stale.
 		if (!usageState) await refreshUsage();
 	}
 
