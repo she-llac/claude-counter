@@ -363,8 +363,9 @@
 			if (!modelSelector) return;
 			const target = this._findUsageAnchor(modelSelector);
 			if (!target) return;
-			// As the composer's last child the row is its bottom edge and needs its own
-			// spacing below it.
+			// As the composer's last child the row is the sticky composer's bottom edge:
+			// it needs its own spacing below, and has to paint the page background so
+			// the transcript does not scroll through it.
 			this.usageLine.classList.toggle('cc-usageRow--composer', target.append);
 			if (target.append) {
 				if (target.anchor.lastElementChild !== this.usageLine) {
