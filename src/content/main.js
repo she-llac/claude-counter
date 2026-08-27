@@ -222,11 +222,11 @@
 		currentConversationId = getConversationId();
 
 		// Attach usage line and header independently - they have different anchor elements
-		// and CHAT_MENU_TRIGGER doesn't exist on home/new pages
+		// and the header anchor doesn't exist on home/new pages
 		waitForElement(CC.DOM.MODEL_SELECTOR_DROPDOWN, 60000).then((el) => {
 			if (el) ui.attachUsageLine();
 		});
-		waitForElement(CC.DOM.CHAT_MENU_TRIGGER, 60000).then((el) => {
+		waitForElement(CC.DOM.HEADER_ANCHOR, 60000).then((el) => {
 			if (el) ui.attachHeader();
 		});
 
