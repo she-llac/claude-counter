@@ -202,6 +202,7 @@
 					CC.waitForElement(CC.DOM.MODEL_SELECTOR_DROPDOWN, 60000).then((el) => {
 						usageReattachPending = false;
 						if (el) this.attachUsageLine();
+						else CC.warnOnce('reattach:model-selector', 'usage row lost and could not be reattached');
 					});
 				}
 
@@ -313,8 +314,28 @@
 		attachHeader() {
 			const chatMenu = document.querySelector(CC.DOM.CHAT_MENU_TRIGGER);
 			if (!chatMenu) return;
-			const anchor = chatMenu.closest(CC.DOM.CHAT_PROJECT_WRAPPER) || chatMenu.parentElement;
-			if (!anchor) return;
+
+			const headerBar = chatMenu.closest(CC.DOM.CHAT_HEADER);
+			let anchor = chatMenu.closest(CC.DOM.CHAT_PROJECT_WRAPPER);
+
+			if (!anchor && headerBar) {
+				// Climb to the title block's outermost wrapper so the counter becomes a
+				// sibling in the header bar's flex row, not a child of the truncating
+				// title wrapper.
+				anchor = chatMenu;
+				while (anchor.parentElement && anchor.parentElement !== headerBar) {
+					anchor = anchor.parentElement;
+				}
+			}
+
+			if (!anchor) anchor = chatMenu.parentElement;
+			if (!anchor || anchor === this.headerContainer) {
+				CC.warnOnce('anchor:header-bar', 'token counter not attached: no usable anchor beside the chat title');
+				return;
+			}
+
+			this.headerContainer.classList.toggle('cc-header--inHeaderBar', anchor.parentElement === headerBar);
+
 			if (anchor.nextElementSibling !== this.headerContainer) {
 				anchor.after(this.headerContainer);
 			}
@@ -328,11 +349,20 @@
 			if (!modelSelector) return;
 			const gridContainer = modelSelector.closest('[data-testid="chat-input-grid-container"]');
 			const gridArea = modelSelector.closest('[data-testid="chat-input-grid-area"]');
+
+			// An out-of-flow ancestor is never a safe anchor: inserting after it drops the
+			// usage row into the normal flow of the nearest positioned parent, on top of
+			// whatever is already there.
+			const isOutOfFlow = (el) => {
+				const position = window.getComputedStyle(el).position;
+				return position === 'absolute' || position === 'fixed';
+			};
+
 			const findToolbarRow = (el, stopAt) => {
 				let cur = el;
 				while (cur && cur !== document.body) {
 					if (stopAt && cur === stopAt) break;
-					if (cur !== el && cur.nodeType === 1) {
+					if (cur !== el && cur.nodeType === 1 && !isOutOfFlow(cur)) {
 						const style = window.getComputedStyle(cur);
 						if (style.display === 'flex' && style.flexDirection === 'row') {
 							const buttons = cur.querySelectorAll('button').length;
@@ -344,14 +374,44 @@
 				return null;
 			};
 
+			// The composer card: the nearest in-flow column stack around the input.
+			// Newer layouts pin the controls with position:absolute, so there is no
+			// toolbar row to sit under and the row becomes the card's last child.
+			const findComposerCard = (el) => {
+				let cur = el.parentElement;
+				while (cur && cur !== document.body) {
+					if (!isOutOfFlow(cur)) {
+						const style = window.getComputedStyle(cur);
+						if (style.display === 'flex' && style.flexDirection === 'column') return cur;
+					}
+					cur = cur.parentElement;
+				}
+				return null;
+			};
+
+			const composerCard = findComposerCard(modelSelector);
 			const toolbarRow =
 				(gridContainer ? findToolbarRow(modelSelector, gridArea || gridContainer) : null) ||
-				findToolbarRow(modelSelector) ||
-				modelSelector.parentElement?.parentElement?.parentElement;
-			if (!toolbarRow) return;
-			if (toolbarRow.nextElementSibling !== this.usageLine) {
-				toolbarRow.after(this.usageLine);
+				findToolbarRow(modelSelector, composerCard);
+
+			if (toolbarRow) {
+				this.usageLine.classList.remove('cc-usageRow--inComposer');
+				if (toolbarRow.nextElementSibling !== this.usageLine) {
+					toolbarRow.after(this.usageLine);
+				}
+			} else if (composerCard) {
+				this.usageLine.classList.add('cc-usageRow--inComposer');
+				if (composerCard.lastElementChild !== this.usageLine) {
+					composerCard.appendChild(this.usageLine);
+				}
+			} else {
+				CC.warnOnce(
+					'anchor:composer',
+					'usage row not attached: no in-flow toolbar row or composer column found above the model selector'
+				);
+				return;
 			}
+
 			this.refreshProgressChrome();
 		}
 
