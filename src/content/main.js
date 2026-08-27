@@ -225,22 +225,28 @@
 		// and CHAT_MENU_TRIGGER doesn't exist on home/new pages
 		waitForElement(CC.DOM.MODEL_SELECTOR_DROPDOWN, 60000).then((el) => {
 			if (el) ui.attachUsageLine();
+			else CC.warnOnce('anchor:model-selector', `usage row not attached: nothing matched ${CC.DOM.MODEL_SELECTOR_DROPDOWN}`);
 		});
 		waitForElement(CC.DOM.CHAT_MENU_TRIGGER, 60000).then((el) => {
 			if (el) ui.attachHeader();
+			// The chat title legitimately does not exist on home/new, so only a
+			// conversation without one is worth reporting.
+			else if (currentConversationId) {
+				CC.warnOnce('anchor:chat-title', `token counter not attached: nothing matched ${CC.DOM.CHAT_MENU_TRIGGER}`);
+			}
 		});
-
-		if (!currentConversationId) {
-			ui.setConversationMetrics();
-			return;
-		}
 
 		// Best-effort orgId from cookie.
 		updateOrgIdIfNeeded(getOrgIdFromCookie());
 
-		await refreshConversation();
+		if (currentConversationId) {
+			await refreshConversation();
+		} else {
+			ui.setConversationMetrics();
+		}
 
-		// Usage is org-level, not conversation-level. Only fetch on first load or if stale.
+		// Usage is org-level, not conversation-level, so it loads on the home and new
+		// chat pages too. Only fetch on first load or if stale.
 		if (!usageState) await refreshUsage();
 	}
 
