@@ -96,6 +96,23 @@
 		return tip;
 	}
 
+	// Nearest ancestor that looks like a composer toolbar row, stopping at `stopAt`.
+	function findToolbarRow(el, stopAt) {
+		let cur = el;
+		while (cur && cur !== document.body) {
+			if (stopAt && cur === stopAt) break;
+			if (cur !== el && cur.nodeType === 1) {
+				const style = window.getComputedStyle(cur);
+				if (style.display === 'flex' && style.flexDirection === 'row') {
+					const buttons = cur.querySelectorAll('button').length;
+					if (buttons > 1) return cur;
+				}
+			}
+			cur = cur.parentElement;
+		}
+		return null;
+	}
+
 	class CounterUI {
 		constructor({ onUsageRefresh } = {}) {
 			this.onUsageRefresh = onUsageRefresh || null;
@@ -207,7 +224,7 @@
 
 				if (headerMissing && !headerReattachPending) {
 					headerReattachPending = true;
-					CC.waitForElement(CC.DOM.CHAT_MENU_TRIGGER, 60000).then((el) => {
+					CC.waitForElement(CC.DOM.HEADER_ANCHOR, 60000).then((el) => {
 						headerReattachPending = false;
 						if (el) this.attachHeader();
 					});
@@ -311,48 +328,94 @@
 		}
 
 		attachHeader() {
-			const chatMenu = document.querySelector(CC.DOM.CHAT_MENU_TRIGGER);
-			if (!chatMenu) return;
-			const anchor = chatMenu.closest(CC.DOM.CHAT_PROJECT_WRAPPER) || chatMenu.parentElement;
-			if (!anchor) return;
-			if (anchor.nextElementSibling !== this.headerContainer) {
-				anchor.after(this.headerContainer);
+			const target = this._findHeaderAnchor();
+			if (!target) return;
+			this.headerContainer.classList.toggle('cc-header--inline', target.inline);
+			if (target.anchor.nextElementSibling !== this.headerContainer) {
+				target.anchor.after(this.headerContainer);
 			}
 			this._renderHeader();
 			this.refreshProgressChrome();
+		}
+
+		_findHeaderAnchor() {
+			// Current layout: the title sits in a horizontal header row, so the counter
+			// goes inline right after it rather than on a line of its own.
+			const titleSplit = document.querySelector(CC.DOM.CHAT_TITLE_SPLIT);
+			if (titleSplit) {
+				const headerRow = titleSplit.closest(CC.DOM.CHAT_HEADER_ROW);
+				const anchor = headerRow
+					? Array.from(headerRow.children).find((el) => el.contains(titleSplit))
+					: titleSplit.parentElement;
+				if (anchor) return { anchor, inline: true };
+			}
+
+			// Older layout: title stack, counter on its own line underneath.
+			const chatMenu = document.querySelector(CC.DOM.CHAT_MENU_TRIGGER);
+			if (!chatMenu) return null;
+			const anchor = chatMenu.closest(CC.DOM.CHAT_PROJECT_WRAPPER) || chatMenu.parentElement;
+			return anchor ? { anchor, inline: false } : null;
 		}
 
 		attachUsageLine() {
 			if (!this.usageLine) return;
 			const modelSelector = document.querySelector(CC.DOM.MODEL_SELECTOR_DROPDOWN);
 			if (!modelSelector) return;
-			const gridContainer = modelSelector.closest('[data-testid="chat-input-grid-container"]');
-			const gridArea = modelSelector.closest('[data-testid="chat-input-grid-area"]');
-			const findToolbarRow = (el, stopAt) => {
-				let cur = el;
-				while (cur && cur !== document.body) {
-					if (stopAt && cur === stopAt) break;
-					if (cur !== el && cur.nodeType === 1) {
-						const style = window.getComputedStyle(cur);
-						if (style.display === 'flex' && style.flexDirection === 'row') {
-							const buttons = cur.querySelectorAll('button').length;
-							if (buttons > 1) return cur;
-						}
-					}
-					cur = cur.parentElement;
+			const target = this._findUsageAnchor(modelSelector);
+			if (!target) return;
+			// As the composer's last child the row is the sticky composer's bottom edge:
+			// it needs its own spacing below, and has to paint the page background so
+			// the transcript does not scroll through it.
+			this.usageLine.classList.toggle('cc-usageRow--composer', target.append);
+			if (target.append) {
+				if (target.anchor.lastElementChild !== this.usageLine) {
+					target.anchor.appendChild(this.usageLine);
 				}
-				return null;
-			};
-
-			const toolbarRow =
-				(gridContainer ? findToolbarRow(modelSelector, gridArea || gridContainer) : null) ||
-				findToolbarRow(modelSelector) ||
-				modelSelector.parentElement?.parentElement?.parentElement;
-			if (!toolbarRow) return;
-			if (toolbarRow.nextElementSibling !== this.usageLine) {
-				toolbarRow.after(this.usageLine);
+			} else if (target.anchor.nextElementSibling !== this.usageLine) {
+				target.anchor.after(this.usageLine);
 			}
+			this.usageLine.classList.toggle('cc-usageRow--gap', !!target.gap);
 			this.refreshProgressChrome();
+		}
+
+		_findUsageAnchor(modelSelector) {
+			// Older layout: the composer was a grid and the row went after the toolbar row
+			// holding the model selector. Checked first so that layout keeps its placement
+			// even if it also had the wrappers COMPOSER_COLUMN matches.
+			const gridContainer = modelSelector.closest(CC.DOM.COMPOSER_GRID);
+			if (gridContainer) {
+				const gridArea = modelSelector.closest(CC.DOM.COMPOSER_GRID_AREA);
+				const anchor =
+					findToolbarRow(modelSelector, gridArea || gridContainer) ||
+					findToolbarRow(modelSelector, gridContainer) ||
+					gridContainer;
+				return { anchor, append: false, gap: false };
+			}
+
+			// Current layout: append to the composer's flex column rather than anchoring off
+			// a toolbar row. In an open chat that lands below the chin; on a fresh chat -
+			// where the model selector lives inside the input box's absolutely-positioned
+			// action cluster - it lands below the box instead of underneath (and
+			// overlapping) that cluster.
+			const column = modelSelector.closest(CC.DOM.COMPOSER_COLUMN);
+			if (column) {
+				// An expanded chin supplies the gap above the row with its own bottom
+				// padding. On a fresh chat the chin is collapsed to nothing and the model
+				// selector sits in the input box instead, so the row has to space itself
+				// off the box. Where the selector lives is the signal - the collapsed chin
+				// is still in the DOM, so its presence alone proves nothing.
+				const gap = !modelSelector.closest(CC.DOM.COMPOSER_CHIN);
+				return { anchor: column, append: true, gap };
+			}
+
+			// Unknown layout: nearest toolbar row, bounded by the composer. Without that
+			// bound the walk escapes to the chat body and lands at the bottom of the window.
+			const composer = modelSelector.closest(CC.DOM.COMPOSER_ROOT);
+			const anchor =
+				findToolbarRow(modelSelector, composer) ||
+				composer ||
+				modelSelector.parentElement?.parentElement?.parentElement;
+			return anchor ? { anchor, append: false, gap: false } : null;
 		}
 
 		setPendingCache(pending) {

@@ -125,3 +125,29 @@
 .cc-hidden {
 	display: none !important;
 }
+
+/* Current claude.ai layout: the chat header is a horizontal row, so the
+   counter sits inline beside the title instead of on its own line. */
+.cc-header--inline {
+	margin-top: 0;
+	display: inline-flex;
+	align-items: center;
+	flex: 0 0 auto;
+	white-space: nowrap;
+}
+
+/* Last child of the composer column: the row is the composer's bottom edge, and
+   the composer is sticky over the scrolling transcript - so the row has to paint
+   the page background the way the chin above it does, or messages show through.
+   Same variable claude.ai's own chin uses for that. */
+.cc-usageRow--composer {
+	padding-bottom: 8px;
+	background: var(--cds-page-bg, var(--cds-surface-1, transparent));
+}
+
+/* Fresh chat: the chin above the row is collapsed to nothing, so it supplies none
+   of the gap its bottom padding gives us in an open chat. */
+.cc-usageRow--gap {
+	margin-top: 1px;
+	padding-top: 10px;
+}
