@@ -207,7 +207,7 @@
 
 				if (headerMissing && !headerReattachPending) {
 					headerReattachPending = true;
-					CC.waitForElement(CC.DOM.CHAT_MENU_TRIGGER, 60000).then((el) => {
+					CC.waitForElement(CC.DOM.HEADER_ACTIONS_SLOT, 60000).then((el) => {
 						headerReattachPending = false;
 						if (el) this.attachHeader();
 					});
@@ -311,13 +311,16 @@
 		}
 
 		attachHeader() {
-			const chatMenu = document.querySelector(CC.DOM.CHAT_MENU_TRIGGER);
-			if (!chatMenu) return;
-			const anchor = chatMenu.closest(CC.DOM.CHAT_PROJECT_WRAPPER) || chatMenu.parentElement;
-			if (!anchor) return;
-			if (anchor.nextElementSibling !== this.headerContainer) {
-				anchor.after(this.headerContainer);
+			const header = document.querySelector(CC.DOM.CHAT_HEADER);
+			if (!header) return;
+
+			const actionsSlot = header.querySelector(CC.DOM.HEADER_ACTIONS_SLOT);
+			if (!actionsSlot) return;
+
+			if (this.headerContainer.parentElement !== actionsSlot) {
+				actionsSlot.prepend(this.headerContainer);
 			}
+
 			this._renderHeader();
 			this.refreshProgressChrome();
 		}
