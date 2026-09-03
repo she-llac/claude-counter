@@ -7,6 +7,7 @@
 		CHAT_MENU_TRIGGER: '[data-testid="chat-menu-trigger"]',
 		MODEL_SELECTOR_DROPDOWN: '[data-testid="model-selector-dropdown"]',
 		CHAT_PROJECT_WRAPPER: '.chat-project-wrapper',
+		CHAT_COMPOSER: '[data-cds="ChatComposer"]',
 		BRIDGE_SCRIPT_ID: 'cc-bridge-script'
 	});
 
