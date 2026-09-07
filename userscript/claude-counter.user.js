@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Claude Counter
 // @namespace    https://github.com/she-llac/claude-counter
-// @version      0.4.2-userscript
+// @version      0.4.3-userscript
 // @description  Shows token count, cache timer, and usage bars on claude.ai.
 // @match        https://claude.ai/*
 // @run-at       document-start
@@ -147,9 +147,10 @@
 	const CC = (globalThis.ClaudeCounter = globalThis.ClaudeCounter || {});
 
 	CC.DOM = Object.freeze({
-		CHAT_MENU_TRIGGER: '[data-testid="chat-menu-trigger"]',
+		CHAT_MENU_TRIGGER: '[data-testid="chat-title-split"]',
 		MODEL_SELECTOR_DROPDOWN: '[data-testid="model-selector-dropdown"]',
 		CHAT_PROJECT_WRAPPER: '.chat-project-wrapper',
+		CHAT_COMPOSER_CHIN: '[data-cds="ChatComposerChin"]',
 		BRIDGE_SCRIPT_ID: 'cc-bridge-script'
 	});
 
@@ -700,10 +701,9 @@
 		}
 
 		attachHeader() {
-			const chatMenu = document.querySelector(CC.DOM.CHAT_MENU_TRIGGER);
-			if (!chatMenu) return;
-			const anchor = chatMenu.closest(CC.DOM.CHAT_PROJECT_WRAPPER) || chatMenu.parentElement;
+			const anchor = document.querySelector(CC.DOM.CHAT_MENU_TRIGGER);
 			if (!anchor) return;
+
 			if (anchor.nextElementSibling !== this.headerContainer) {
 				anchor.after(this.headerContainer);
 			}
@@ -715,31 +715,12 @@
 			if (!this.usageLine) return;
 			const modelSelector = document.querySelector(CC.DOM.MODEL_SELECTOR_DROPDOWN);
 			if (!modelSelector) return;
-			const gridContainer = modelSelector.closest('[data-testid="chat-input-grid-container"]');
-			const gridArea = modelSelector.closest('[data-testid="chat-input-grid-area"]');
-			const findToolbarRow = (el, stopAt) => {
-				let cur = el;
-				while (cur && cur !== document.body) {
-					if (stopAt && cur === stopAt) break;
-					if (cur !== el && cur.nodeType === 1) {
-						const style = window.getComputedStyle(cur);
-						if (style.display === 'flex' && style.flexDirection === 'row') {
-							const buttons = cur.querySelectorAll('button').length;
-							if (buttons > 1) return cur;
-						}
-					}
-					cur = cur.parentElement;
-				}
-				return null;
-			};
+			const chin = modelSelector.closest(CC.DOM.CHAT_COMPOSER_CHIN)
+				|| modelSelector.parentElement?.parentElement?.parentElement; // last-resort fallback, kept for resilience
+			if (!chin) return;
 
-			const toolbarRow =
-				(gridContainer ? findToolbarRow(modelSelector, gridArea || gridContainer) : null) ||
-				findToolbarRow(modelSelector) ||
-				modelSelector.parentElement?.parentElement?.parentElement;
-			if (!toolbarRow) return;
-			if (toolbarRow.nextElementSibling !== this.usageLine) {
-				toolbarRow.after(this.usageLine);
+			if (chin.lastElementChild !== this.usageLine) {
+				chin.appendChild(this.usageLine);
 			}
 			this.refreshProgressChrome();
 		}
