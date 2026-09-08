@@ -324,30 +324,26 @@
 
 		attachUsageLine() {
 			if (!this.usageLine) return;
+			// Anchor to the composer's own root rather than the model selector button:
+			// Claude relocates the model selector (out of the input's action row and into
+			// the disclaimer "chin") once a conversation has messages, which breaks any
+			// anchor built by walking up from it. `[data-cds="ChatComposer"]` and its first
+			// child (the visual composer card) stay structurally stable across both the
+			// empty-chat and active-chat layouts, so append there as the card's last row.
+			const composer = document.querySelector(CC.DOM.CHAT_COMPOSER);
+			const composerBox = composer?.firstElementChild;
+			if (composerBox) {
+				if (composerBox.lastElementChild !== this.usageLine) {
+					composerBox.appendChild(this.usageLine);
+				}
+					this.refreshProgressChrome();
+				return;
+			}
+
+			// Fallback for markup we don't recognize: anchor near the model selector.
 			const modelSelector = document.querySelector(CC.DOM.MODEL_SELECTOR_DROPDOWN);
 			if (!modelSelector) return;
-			const gridContainer = modelSelector.closest('[data-testid="chat-input-grid-container"]');
-			const gridArea = modelSelector.closest('[data-testid="chat-input-grid-area"]');
-			const findToolbarRow = (el, stopAt) => {
-				let cur = el;
-				while (cur && cur !== document.body) {
-					if (stopAt && cur === stopAt) break;
-					if (cur !== el && cur.nodeType === 1) {
-						const style = window.getComputedStyle(cur);
-						if (style.display === 'flex' && style.flexDirection === 'row') {
-							const buttons = cur.querySelectorAll('button').length;
-							if (buttons > 1) return cur;
-						}
-					}
-					cur = cur.parentElement;
-				}
-				return null;
-			};
-
-			const toolbarRow =
-				(gridContainer ? findToolbarRow(modelSelector, gridArea || gridContainer) : null) ||
-				findToolbarRow(modelSelector) ||
-				modelSelector.parentElement?.parentElement?.parentElement;
+			const toolbarRow = modelSelector.parentElement?.parentElement?.parentElement;
 			if (!toolbarRow) return;
 			if (toolbarRow.nextElementSibling !== this.usageLine) {
 				toolbarRow.after(this.usageLine);
