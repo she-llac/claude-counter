@@ -8,7 +8,7 @@
 	white-space: nowrap;
 }
 
-/* Usage row: session + weekly */
+/* Usage row: session + weekly + per-model weekly */
 .cc-usageRow {
 	position: relative;
 	z-index: 50;
@@ -27,14 +27,6 @@
 	gap: 8px;
 	flex: 1;
 	min-width: 0;
-}
-
-.cc-usageGroup--single {
-	width: 100%;
-}
-
-.cc-usageGroup--weekly {
-	justify-content: flex-end;
 }
 
 .cc-usageText {

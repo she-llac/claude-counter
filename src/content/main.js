@@ -94,8 +94,18 @@
 		const fiveHour = normalizeWindow(raw.five_hour, 5);
 		const sevenDay = normalizeWindow(raw.seven_day, 24 * 7);
 
-		if (!fiveHour && !sevenDay) return null;
-		return { five_hour: fiveHour, seven_day: sevenDay };
+		// Per-model weekly limits (e.g. Fable) only exist in the `limits` array:
+		// { kind: 'weekly_scoped', percent, resets_at, scope: { model: { display_name } } }
+		const scoped = [];
+		for (const limit of Array.isArray(raw.limits) ? raw.limits : []) {
+			if (limit?.kind !== 'weekly_scoped') continue;
+			const label = limit.scope?.model?.display_name;
+			const usageWindow = normalizeWindow({ utilization: limit.percent, resets_at: limit.resets_at }, 24 * 7);
+			if (label && usageWindow) scoped.push({ label, ...usageWindow });
+		}
+
+		if (!fiveHour && !sevenDay && !scoped.length) return null;
+		return { five_hour: fiveHour, seven_day: sevenDay, scoped };
 	}
 
 	function parseUsageFromMessageLimit(raw) {
@@ -211,7 +221,11 @@
 
 	function handleMessageLimit(messageLimit) {
 		const parsed = parseUsageFromMessageLimit(messageLimit);
-		applyUsageUpdate(parsed, 'sse');
+		if (!parsed) return;
+		// The stream only carries the 5h/7d windows: keep the per-model bars from the last
+		// usage fetch, then re-fetch so they catch up with this message.
+		applyUsageUpdate({ ...parsed, scoped: usageState?.scoped || [] }, 'sse');
+		refreshUsage();
 	}
 
 	CC.bridge.on('cc:generation_start', handleGenerationStart);
