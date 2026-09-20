@@ -199,7 +199,7 @@
 
 				if (usageMissing && !usageReattachPending) {
 					usageReattachPending = true;
-					CC.waitForElement(CC.DOM.MODEL_SELECTOR_DROPDOWN, 60000).then((el) => {
+					CC.waitForElement(`${CC.DOM.CHAT_INPUT_CONTAINER}, .ProseMirror, [contenteditable="true"]`, 60000).then((el) => {
 						usageReattachPending = false;
 						if (el) this.attachUsageLine();
 					});
@@ -322,35 +322,74 @@
 			this.refreshProgressChrome();
 		}
 
+		_getComposerCard() {
+			const editor = document.querySelector('.ProseMirror, [contenteditable="true"]');
+			if (!editor) return null;
+
+			const modelSelector = document.querySelector(CC.DOM.MODEL_SELECTOR_DROPDOWN);
+			let cur = editor;
+			let cardByRadius = null;
+
+			while (cur && cur.parentElement && cur.parentElement !== document.body) {
+				const parent = cur.parentElement;
+				const parentText = parent.textContent || '';
+				const hasDisclaimer = parentText.includes('make mistakes') || parentText.includes('double-check responses');
+				const hasExternalModel = modelSelector && parent.contains(modelSelector) && !cur.contains(modelSelector);
+				const isOuterWrapper = parent.matches?.('[data-testid="chat-input-grid-container"], form, fieldset');
+
+				if (hasDisclaimer || hasExternalModel || isOuterWrapper) {
+					return cur;
+				}
+
+				const style = window.getComputedStyle(cur);
+				if (parseFloat(style.borderTopLeftRadius) >= 8) {
+					cardByRadius = cur;
+				}
+
+				cur = parent;
+			}
+
+			return cardByRadius || cur;
+		}
+
 		attachUsageLine() {
 			if (!this.usageLine) return;
-			const modelSelector = document.querySelector(CC.DOM.MODEL_SELECTOR_DROPDOWN);
-			if (!modelSelector) return;
-			const gridContainer = modelSelector.closest('[data-testid="chat-input-grid-container"]');
-			const gridArea = modelSelector.closest('[data-testid="chat-input-grid-area"]');
+			const composerCard = this._getComposerCard();
+			if (!composerCard) return;
+
+			const buttons = composerCard.querySelectorAll('button');
+			const targetButton = buttons.length > 0 ? buttons[buttons.length - 1] : null;
 			const findToolbarRow = (el, stopAt) => {
 				let cur = el;
+				let lastMatched = null;
 				while (cur && cur !== document.body) {
 					if (stopAt && cur === stopAt) break;
 					if (cur !== el && cur.nodeType === 1) {
 						const style = window.getComputedStyle(cur);
 						if (style.display === 'flex' && style.flexDirection === 'row') {
-							const buttons = cur.querySelectorAll('button').length;
-							if (buttons > 1) return cur;
+							const btns = cur.querySelectorAll('button').length;
+							if (btns >= 1 || cur.parentElement === stopAt) {
+								lastMatched = cur;
+								if (cur.parentElement === stopAt) break;
+							}
 						}
 					}
 					cur = cur.parentElement;
 				}
-				return null;
+				return lastMatched;
 			};
 
-			const toolbarRow =
-				(gridContainer ? findToolbarRow(modelSelector, gridArea || gridContainer) : null) ||
-				findToolbarRow(modelSelector) ||
-				modelSelector.parentElement?.parentElement?.parentElement;
-			if (!toolbarRow) return;
-			if (toolbarRow.nextElementSibling !== this.usageLine) {
-				toolbarRow.after(this.usageLine);
+			const toolbarRow = targetButton ? findToolbarRow(targetButton, composerCard) : null;
+			const insertTarget = toolbarRow && toolbarRow.parentElement === composerCard ? toolbarRow : null;
+
+			if (insertTarget) {
+				if (insertTarget.nextElementSibling !== this.usageLine) {
+					insertTarget.after(this.usageLine);
+				}
+			} else {
+				if (composerCard.lastElementChild !== this.usageLine) {
+					composerCard.appendChild(this.usageLine);
+				}
 			}
 			this.refreshProgressChrome();
 		}
