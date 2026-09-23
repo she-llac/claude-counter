@@ -2,6 +2,10 @@
   "manifest_version": 3,
   "name": "Claude Counter with tiding",
   "version": "0.4.3",
+  "permissions": [
+    "notifications",
+    "storage"
+  ],
   "browser_specific_settings": {
     "gecko": {
       "id": "{236c6889-52b6-4454-bc4b-5a2ad18effa2}",

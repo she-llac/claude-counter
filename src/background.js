@@ -5,3 +5,19 @@ chrome.action.onClicked.addListener((tab) => {
 		});
 	}
 });
+
+chrome.runtime.onMessage.addListener((message) => {
+	if (message && message.action === 'send_notification') {
+		const { title, body } = message;
+		if (chrome.notifications) {
+			chrome.notifications.create({
+				type: 'basic',
+				iconUrl: 'icons/icon128.png',
+				title: title || 'Claude Counter',
+				message: body || '',
+				priority: 2
+			});
+		}
+	}
+});
+

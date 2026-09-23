@@ -216,9 +216,41 @@
 		}
 	}
 
+	function sendNotification(title, body) {
+		try {
+			if (globalThis.chrome?.runtime?.sendMessage) {
+				globalThis.chrome.runtime.sendMessage({
+					action: 'send_notification',
+					title,
+					body
+				}).catch(() => {});
+			}
+			if ('Notification' in window) {
+				if (Notification.permission === 'granted') {
+					new Notification(title, { body });
+				} else if (Notification.permission !== 'denied') {
+					Notification.requestPermission().then((perm) => {
+						if (perm === 'granted') {
+							new Notification(title, { body });
+						}
+					});
+				}
+			}
+		} catch (e) {
+			console.error('Failed to send notification:', e);
+		}
+	}
+
+	if ('Notification' in window && Notification.permission === 'default') {
+		Notification.requestPermission().catch(() => {});
+	}
+
+	let lastFiveHourResetKey = null;
+
 	function applyUsageUpdate(normalized, source) {
 		if (!normalized) return;
 		const now = Date.now();
+		const prevFiveHourResetKey = lastFiveHourResetKey;
 		usageState = normalized;
 		lastUsageUpdateMs = now;
 		if (source === 'sse') lastUsageSseMs = now;
@@ -231,6 +263,14 @@
 			activeResetTimerMs = fiveHourReset;
 		} else {
 			activeResetTimerMs = null;
+		}
+
+		if (normalized.five_hour?.resets_at) {
+			lastFiveHourResetKey = normalized.five_hour.resets_at;
+			if (prevFiveHourResetKey && prevFiveHourResetKey !== normalized.five_hour.resets_at) {
+				const resetStr = new Date(normalized.five_hour.resets_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+				sendNotification('Claude Session Started', `New 5-hour session is active (resets @ ${resetStr}).`);
+			}
 		}
 
 		ui.setUsage(normalized);
@@ -399,15 +439,19 @@
 		if (activeResetTimerMs && now >= activeResetTimerMs) {
 			activeResetTimerMs = null;
 			playTidingSound();
+			sendNotification('Claude Session Reset', 'Your 5-hour Claude session has reset! Full capacity is restored.');
 			refreshUsage();
 		}
 
 		if (usageResetMs.five_hour && now >= usageResetMs.five_hour && rolloverHandledForResetMs.five_hour !== usageResetMs.five_hour) {
 			rolloverHandledForResetMs.five_hour = usageResetMs.five_hour;
+			playTidingSound();
+			sendNotification('Claude Session Reset', 'Your 5-hour Claude session has reset!');
 			refreshUsage();
 		}
 		if (usageResetMs.seven_day && now >= usageResetMs.seven_day && rolloverHandledForResetMs.seven_day !== usageResetMs.seven_day) {
 			rolloverHandledForResetMs.seven_day = usageResetMs.seven_day;
+			sendNotification('Claude Weekly Limit Reset', 'Your weekly Claude usage limit has reset!');
 			refreshUsage();
 		}
 

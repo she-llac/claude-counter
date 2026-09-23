@@ -153,6 +153,8 @@
 		CHAT_MENU_TRIGGER: '[data-testid="chat-menu-trigger"]',
 		MODEL_SELECTOR_DROPDOWN: '[data-testid="model-selector-dropdown"]',
 		CHAT_PROJECT_WRAPPER: '.chat-project-wrapper',
+		CHAT_INPUT_CONTAINER: '[data-testid="chat-input-grid-container"]',
+		CHAT_INPUT_AREA: '[data-testid="chat-input-grid-area"]',
 		BRIDGE_SCRIPT_ID: 'cc-bridge-script'
 	});
 
@@ -812,51 +814,26 @@
 			if (!this.usageLine) return;
 			let anchor = null;
 
-			// 1. Try model selector first
-			const modelSelector = document.querySelector(CC.DOM.MODEL_SELECTOR_DROPDOWN);
-			if (modelSelector) {
-				const gridContainer = modelSelector.closest('[data-testid="chat-input-grid-container"]');
-				const gridArea = modelSelector.closest('[data-testid="chat-input-grid-area"]');
-				const findToolbarRow = (el, stopAt) => {
-					let cur = el;
-					while (cur && cur !== document.body) {
-						if (stopAt && cur === stopAt) break;
-						if (cur !== el && cur.nodeType === 1) {
-							const style = window.getComputedStyle(cur);
-							if (style.display === 'flex' && style.flexDirection === 'row') {
-								const buttons = cur.querySelectorAll('button').length;
-								if (buttons > 1) return cur;
-							}
-						}
-						cur = cur.parentElement;
-					}
-					return null;
-				};
+			// 1. Find the outer input card / container
+			const inputContainer =
+				document.querySelector(CC.DOM.CHAT_INPUT_CONTAINER) ||
+				document.querySelector(CC.DOM.CHAT_INPUT_AREA) ||
+				document.querySelector('form:has(textarea)') ||
+				document.querySelector('textarea')?.closest('form') ||
+				document.querySelector('textarea')?.closest('fieldset') ||
+				document.querySelector('textarea')?.closest('.relative');
 
-				anchor =
-					(gridContainer ? findToolbarRow(modelSelector, gridArea || gridContainer) : null) ||
-					findToolbarRow(modelSelector) ||
-					modelSelector.parentElement?.parentElement?.parentElement;
-			}
-
-			// 2. Fallback for Claude Code / other layouts
-			if (!anchor) {
-				const inputGrid = document.querySelector('[data-testid="chat-input-grid-container"]') || 
-				                  document.querySelector('[data-testid="chat-input-grid-area"]') ||
-				                  document.querySelector('form') ||
-				                  document.querySelector('textarea')?.closest('div');
-				if (inputGrid) {
-					const buttons = inputGrid.querySelectorAll('button');
-					if (buttons.length > 0) {
-						for (const btn of buttons) {
-							const row = btn.closest('.flex-row') || btn.parentElement;
-							if (row && inputGrid.contains(row)) {
-								anchor = row;
-								break;
-							}
-						}
-					}
-					if (!anchor) anchor = inputGrid;
+			if (inputContainer) {
+				anchor = inputContainer;
+			} else {
+				// Fallback via model selector's top card container
+				const modelSelector = document.querySelector(CC.DOM.MODEL_SELECTOR_DROPDOWN);
+				if (modelSelector) {
+					anchor =
+						modelSelector.closest('[data-testid="chat-input-grid-container"]') ||
+						modelSelector.closest('form') ||
+						modelSelector.closest('fieldset') ||
+						modelSelector.parentElement?.parentElement?.parentElement;
 				}
 			}
 
@@ -1147,7 +1124,7 @@
 	CC.__ccUserscriptStarted = true;
 
 	const STYLE_ID = 'cc-userscript-styles';
-	const STYLES = '/* Header: tokens + cache timer */\n.cc-header {\n\tdisplay: inline-flex;\n\talign-items: center;\n\tmargin: 6px 12px;\n\tpadding: 4px 8px;\n\tbackground: rgba(128, 128, 128, 0.05);\n\tborder: 1px solid rgba(128, 128, 128, 0.1);\n\tborder-radius: 6px;\n\tfont-size: 11px;\n\tuser-select: none;\n}\n\n.cc-headerItem {\n\twhite-space: nowrap;\n}\n\n/* Usage row: session + weekly */\n.cc-usageRow {\n\tgrid-column: 1 / -1;\n\twidth: 100%;\n\tdisplay: flex;\n\tflex-direction: row;\n\talign-items: center;\n\tgap: 12px;\n\tmargin-top: 6px;\n\tposition: relative;\n\tz-index: 50;\n\tcursor: pointer;\n\tuser-select: none;\n\ttransition: opacity 150ms ease;\n}\n\n.cc-usageRow--dim {\n\topacity: 0.6;\n}\n\n/* Row group layout */\n.cc-usageGroup {\n\tdisplay: flex;\n\talign-items: center;\n\tgap: 8px;\n\tflex: 1;\n\tmin-width: 0;\n}\n\n.cc-usageGroup--single {\n\twidth: 100%;\n}\n\n.cc-usageGroup--weekly {\n\tjustify-content: flex-end;\n}\n\n.cc-usageText {\n\twhite-space: nowrap;\n\tcursor: pointer;\n}\n\n.cc-usageText:hover {\n\ttext-decoration: underline;\n}\n\n/* Bars (mini + usage) */\n.cc-bar {\n\t--cc-radius: 3px;\n\t--cc-stroke: transparent;\n\t--cc-fill: transparent;\n\t--cc-fill-warn: var(--cc-fill);\n\t--cc-marker: transparent;\n\n\tposition: relative;\n\tbox-sizing: border-box;\n\twidth: 100%;\n\theight: 6px;\n\tborder-radius: var(--cc-radius);\n\tborder: 1px solid var(--cc-stroke);\n\toverflow: visible;\n\tuser-select: none;\n}\n\n.cc-bar__fill {\n\twidth: 0%;\n\theight: 100%;\n\tbackground: var(--cc-fill);\n\ttransition: width 300ms ease, background-color 300ms ease;\n\tborder-top-left-radius: max(0px, calc(var(--cc-radius) - 1px));\n\tborder-bottom-left-radius: max(0px, calc(var(--cc-radius) - 1px));\n\tborder-top-right-radius: 0;\n\tborder-bottom-right-radius: 0;\n}\n\n.cc-bar__fill.cc-full {\n\tborder-top-right-radius: max(0px, calc(var(--cc-radius) - 1px));\n\tborder-bottom-right-radius: max(0px, calc(var(--cc-radius) - 1px));\n}\n\n.cc-bar__fill.cc-warn {\n\tbackground: var(--cc-fill-warn);\n}\n\n.cc-bar__marker {\n\tposition: absolute;\n\ttop: 0;\n\tbottom: 0;\n\tleft: 0%;\n\twidth: 2px;\n\tbackground: var(--cc-marker);\n\tpointer-events: none;\n}\n\n.cc-bar--mini {\n\twidth: 60px;\n\theight: 7px;\n\t--cc-radius: 2px;\n}\n\n.cc-bar--usage {\n\theight: 10px;\n\tflex: 1;\n}\n\n/* Tooltips */\n.cc-tooltip {\n\tposition: fixed;\n\tz-index: 9999;\n\tpadding: 4px 8px;\n\tborder-radius: 4px;\n\tfont-size: 12px;\n\twhite-space: pre-line;\n\tuser-select: none;\n\tpointer-events: none;\n\topacity: 0;\n\ttransition: opacity 200ms ease;\n}\n\n.cc-tooltipTrigger {\n\t-webkit-touch-callout: none;\n\t-webkit-user-select: none;\n\tuser-select: none;\n\tcursor: help;\n}\n\n/* Hide optional elements completely (no layout space) */\n.cc-hidden {\n\tdisplay: none !important;\n}\n';
+	const STYLES = '/* Header: tokens + cache timer */\n.cc-header {\n\tdisplay: inline-flex;\n\talign-items: center;\n\tmargin: 6px 12px;\n\tpadding: 4px 8px;\n\tbackground: rgba(128, 128, 128, 0.05);\n\tborder: 1px solid rgba(128, 128, 128, 0.1);\n\tborder-radius: 6px;\n\tfont-size: 11px;\n\tuser-select: none;\n}\n\n.cc-headerItem {\n\twhite-space: nowrap;\n}\n\n/* Usage row: session + weekly */\n.cc-usageRow {\n\tbox-sizing: border-box;\n\twidth: 100%;\n\tmax-width: 100%;\n\tdisplay: flex;\n\tflex-direction: row;\n\talign-items: center;\n\tjustify-content: space-between;\n\tflex-wrap: wrap;\n\tgap: 8px 16px;\n\tmargin-top: 8px;\n\tmargin-bottom: 4px;\n\tpadding: 4px 6px;\n\tposition: relative;\n\tz-index: 10;\n\tcursor: pointer;\n\tuser-select: none;\n\ttransition: opacity 150ms ease;\n\tclear: both;\n}\n\n.cc-usageRow--dim {\n\topacity: 0.6;\n}\n\n/* Row group layout */\n.cc-usageGroup {\n\tdisplay: flex;\n\talign-items: center;\n\tgap: 8px;\n\tflex: 1 1 180px;\n\tmin-width: 0;\n}\n\n.cc-usageGroup--single {\n\twidth: 100%;\n}\n\n.cc-usageGroup--weekly {\n\tjustify-content: flex-end;\n}\n\n.cc-usageText {\n\twhite-space: nowrap;\n\tcursor: pointer;\n}\n\n.cc-usageText:hover {\n\ttext-decoration: underline;\n}\n\n/* Bars (mini + usage) */\n.cc-bar {\n\t--cc-radius: 3px;\n\t--cc-stroke: transparent;\n\t--cc-fill: transparent;\n\t--cc-fill-warn: var(--cc-fill);\n\t--cc-marker: transparent;\n\n\tposition: relative;\n\tbox-sizing: border-box;\n\twidth: 100%;\n\theight: 6px;\n\tborder-radius: var(--cc-radius);\n\tborder: 1px solid var(--cc-stroke);\n\toverflow: visible;\n\tuser-select: none;\n}\n\n.cc-bar__fill {\n\twidth: 0%;\n\theight: 100%;\n\tbackground: var(--cc-fill);\n\ttransition: width 300ms ease, background-color 300ms ease;\n\tborder-top-left-radius: max(0px, calc(var(--cc-radius) - 1px));\n\tborder-bottom-left-radius: max(0px, calc(var(--cc-radius) - 1px));\n\tborder-top-right-radius: 0;\n\tborder-bottom-right-radius: 0;\n}\n\n.cc-bar__fill.cc-full {\n\tborder-top-right-radius: max(0px, calc(var(--cc-radius) - 1px));\n\tborder-bottom-right-radius: max(0px, calc(var(--cc-radius) - 1px));\n}\n\n.cc-bar__fill.cc-warn {\n\tbackground: var(--cc-fill-warn);\n}\n\n.cc-bar__marker {\n\tposition: absolute;\n\ttop: 0;\n\tbottom: 0;\n\tleft: 0%;\n\twidth: 2px;\n\tbackground: var(--cc-marker);\n\tpointer-events: none;\n}\n\n.cc-bar--mini {\n\twidth: 60px;\n\theight: 7px;\n\t--cc-radius: 2px;\n}\n\n.cc-bar--usage {\n\theight: 8px;\n\tflex: 1;\n\tmin-width: 50px;\n}\n\n/* Tooltips */\n.cc-tooltip {\n\tposition: fixed;\n\tz-index: 9999;\n\tpadding: 4px 8px;\n\tborder-radius: 4px;\n\tfont-size: 12px;\n\twhite-space: pre-line;\n\tuser-select: none;\n\tpointer-events: none;\n\topacity: 0;\n\ttransition: opacity 200ms ease;\n}\n\n.cc-tooltipTrigger {\n\t-webkit-touch-callout: none;\n\t-webkit-user-select: none;\n\tuser-select: none;\n\tcursor: help;\n}\n\n/* Hide optional elements completely (no layout space) */\n.cc-hidden {\n\tdisplay: none !important;\n}\n';
 
 	function injectStyles() {
 		if (document.getElementById(STYLE_ID)) return;
@@ -1333,9 +1310,34 @@
 		}
 	}
 
+	function sendNotification(title, body) {
+		try {
+			if ('Notification' in window) {
+				if (Notification.permission === 'granted') {
+					new Notification(title, { body });
+				} else if (Notification.permission !== 'denied') {
+					Notification.requestPermission().then((perm) => {
+						if (perm === 'granted') {
+							new Notification(title, { body });
+						}
+					});
+				}
+			}
+		} catch (e) {
+			console.error('Failed to send notification:', e);
+		}
+	}
+
+	if ('Notification' in window && Notification.permission === 'default') {
+		Notification.requestPermission().catch(() => {});
+	}
+
+	let lastFiveHourResetKey = null;
+
 	function applyUsageUpdate(normalized, source) {
 		if (!normalized) return;
 		const now = Date.now();
+		const prevFiveHourResetKey = lastFiveHourResetKey;
 		usageState = normalized;
 		lastUsageUpdateMs = now;
 		if (source === 'sse') lastUsageSseMs = now;
@@ -1347,6 +1349,14 @@
 			activeResetTimerMs = fiveHourReset;
 		} else {
 			activeResetTimerMs = null;
+		}
+
+		if (normalized.five_hour?.resets_at) {
+			lastFiveHourResetKey = normalized.five_hour.resets_at;
+			if (prevFiveHourResetKey && prevFiveHourResetKey !== normalized.five_hour.resets_at) {
+				const resetStr = new Date(normalized.five_hour.resets_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+				sendNotification('Claude Session Started', `New 5-hour session is active (resets @ ${resetStr}).`);
+			}
 		}
 
 		ui.setUsage(normalized);
@@ -1481,15 +1491,19 @@
 		if (activeResetTimerMs && now >= activeResetTimerMs) {
 			activeResetTimerMs = null;
 			playTidingSound();
+			sendNotification('Claude Session Reset', 'Your 5-hour Claude session has reset! Full capacity is restored.');
 			refreshUsage();
 		}
 
 		if (usageResetMs.five_hour && now >= usageResetMs.five_hour && rolloverHandledForResetMs.five_hour !== usageResetMs.five_hour) {
 			rolloverHandledForResetMs.five_hour = usageResetMs.five_hour;
+			playTidingSound();
+			sendNotification('Claude Session Reset', 'Your 5-hour Claude session has reset!');
 			refreshUsage();
 		}
 		if (usageResetMs.seven_day && now >= usageResetMs.seven_day && rolloverHandledForResetMs.seven_day !== usageResetMs.seven_day) {
 			rolloverHandledForResetMs.seven_day = usageResetMs.seven_day;
+			sendNotification('Claude Weekly Limit Reset', 'Your weekly Claude usage limit has reset!');
 			refreshUsage();
 		}
 

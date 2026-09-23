@@ -405,51 +405,26 @@
 			if (!this.usageLine) return;
 			let anchor = null;
 
-			// 1. Try model selector first
-			const modelSelector = document.querySelector(CC.DOM.MODEL_SELECTOR_DROPDOWN);
-			if (modelSelector) {
-				const gridContainer = modelSelector.closest('[data-testid="chat-input-grid-container"]');
-				const gridArea = modelSelector.closest('[data-testid="chat-input-grid-area"]');
-				const findToolbarRow = (el, stopAt) => {
-					let cur = el;
-					while (cur && cur !== document.body) {
-						if (stopAt && cur === stopAt) break;
-						if (cur !== el && cur.nodeType === 1) {
-							const style = window.getComputedStyle(cur);
-							if (style.display === 'flex' && style.flexDirection === 'row') {
-								const buttons = cur.querySelectorAll('button').length;
-								if (buttons > 1) return cur;
-							}
-						}
-						cur = cur.parentElement;
-					}
-					return null;
-				};
+			// 1. Find the outer input card / container
+			const inputContainer =
+				document.querySelector(CC.DOM.CHAT_INPUT_CONTAINER) ||
+				document.querySelector(CC.DOM.CHAT_INPUT_AREA) ||
+				document.querySelector('form:has(textarea)') ||
+				document.querySelector('textarea')?.closest('form') ||
+				document.querySelector('textarea')?.closest('fieldset') ||
+				document.querySelector('textarea')?.closest('.relative');
 
-				anchor =
-					(gridContainer ? findToolbarRow(modelSelector, gridArea || gridContainer) : null) ||
-					findToolbarRow(modelSelector) ||
-					modelSelector.parentElement?.parentElement?.parentElement;
-			}
-
-			// 2. Fallback for Claude Code / other layouts
-			if (!anchor) {
-				const inputGrid = document.querySelector('[data-testid="chat-input-grid-container"]') || 
-				                  document.querySelector('[data-testid="chat-input-grid-area"]') ||
-				                  document.querySelector('form') ||
-				                  document.querySelector('textarea')?.closest('div');
-				if (inputGrid) {
-					const buttons = inputGrid.querySelectorAll('button');
-					if (buttons.length > 0) {
-						for (const btn of buttons) {
-							const row = btn.closest('.flex-row') || btn.parentElement;
-							if (row && inputGrid.contains(row)) {
-								anchor = row;
-								break;
-							}
-						}
-					}
-					if (!anchor) anchor = inputGrid;
+			if (inputContainer) {
+				anchor = inputContainer;
+			} else {
+				// Fallback via model selector's top card container
+				const modelSelector = document.querySelector(CC.DOM.MODEL_SELECTOR_DROPDOWN);
+				if (modelSelector) {
+					anchor =
+						modelSelector.closest('[data-testid="chat-input-grid-container"]') ||
+						modelSelector.closest('form') ||
+						modelSelector.closest('fieldset') ||
+						modelSelector.parentElement?.parentElement?.parentElement;
 				}
 			}
 

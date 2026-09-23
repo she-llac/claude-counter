@@ -17,18 +17,24 @@
 
 /* Usage row: session + weekly */
 .cc-usageRow {
-	grid-column: 1 / -1;
+	box-sizing: border-box;
 	width: 100%;
+	max-width: 100%;
 	display: flex;
 	flex-direction: row;
 	align-items: center;
-	gap: 12px;
-	margin-top: 6px;
+	justify-content: space-between;
+	flex-wrap: wrap;
+	gap: 8px 16px;
+	margin-top: 8px;
+	margin-bottom: 4px;
+	padding: 4px 6px;
 	position: relative;
-	z-index: 50;
+	z-index: 10;
 	cursor: pointer;
 	user-select: none;
 	transition: opacity 150ms ease;
+	clear: both;
 }
 
 .cc-usageRow--dim {
@@ -40,7 +46,7 @@
 	display: flex;
 	align-items: center;
 	gap: 8px;
-	flex: 1;
+	flex: 1 1 180px;
 	min-width: 0;
 }
 
