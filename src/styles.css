@@ -1,6 +1,13 @@
 /* Header: tokens + cache timer */
 .cc-header {
-	margin-top: 2px;
+	display: inline-flex;
+	align-items: center;
+	margin: 6px 12px;
+	padding: 4px 8px;
+	background: rgba(128, 128, 128, 0.05);
+	border: 1px solid rgba(128, 128, 128, 0.1);
+	border-radius: 6px;
+	font-size: 11px;
 	user-select: none;
 }
 
@@ -10,22 +17,36 @@
 
 /* Usage row: session + weekly */
 .cc-usageRow {
+	box-sizing: border-box;
+	width: 100%;
+	max-width: 100%;
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	justify-content: space-between;
+	flex-wrap: wrap;
+	gap: 8px 16px;
+	margin-top: 8px;
+	margin-bottom: 4px;
+	padding: 4px 6px;
 	position: relative;
-	z-index: 50;
+	z-index: 10;
 	cursor: pointer;
 	user-select: none;
 	transition: opacity 150ms ease;
+	clear: both;
 }
 
 .cc-usageRow--dim {
 	opacity: 0.6;
 }
 
+/* Row group layout */
 .cc-usageGroup {
 	display: flex;
 	align-items: center;
 	gap: 8px;
-	flex: 1;
+	flex: 1 1 180px;
 	min-width: 0;
 }
 
@@ -39,6 +60,11 @@
 
 .cc-usageText {
 	white-space: nowrap;
+	cursor: pointer;
+}
+
+.cc-usageText:hover {
+	text-decoration: underline;
 }
 
 /* Bars (mini + usage) */
@@ -96,8 +122,9 @@
 }
 
 .cc-bar--usage {
-	height: 10px;
+	height: 8px;
 	flex: 1;
+	min-width: 50px;
 }
 
 /* Tooltips */

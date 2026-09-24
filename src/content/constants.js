@@ -7,6 +7,8 @@
 		CHAT_MENU_TRIGGER: '[data-testid="chat-menu-trigger"]',
 		MODEL_SELECTOR_DROPDOWN: '[data-testid="model-selector-dropdown"]',
 		CHAT_PROJECT_WRAPPER: '.chat-project-wrapper',
+		CHAT_INPUT_CONTAINER: '[data-testid="chat-input-grid-container"]',
+		CHAT_INPUT_AREA: '[data-testid="chat-input-grid-area"]',
 		BRIDGE_SCRIPT_ID: 'cc-bridge-script'
 	});
 

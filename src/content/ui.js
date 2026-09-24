@@ -33,6 +33,39 @@
 		return `${days}d ${remHours}h`;
 	}
 
+	function formatLocalTime(timestampMs) {
+		if (!timestampMs) return '';
+		try {
+			const date = new Date(timestampMs);
+			const timeStr = date.toLocaleTimeString([], {
+				hour: 'numeric',
+				minute: '2-digit',
+				hour12: true
+			});
+			return `@ ${timeStr}`;
+		} catch {
+			return '';
+		}
+	}
+
+	function getFullLocalResetString(timestampMs) {
+		if (!timestampMs) return '';
+		try {
+			const date = new Date(timestampMs);
+			return date.toLocaleString([], {
+				weekday: 'long',
+				year: 'numeric',
+				month: 'long',
+				day: 'numeric',
+				hour: 'numeric',
+				minute: '2-digit',
+				timeZoneName: 'long'
+			});
+		} catch {
+			return '';
+		}
+	}
+
 	function setupTooltip(element, tooltip, { topOffset = 10 } = {}) {
 		if (!element || !tooltip) return;
 		if (element.hasAttribute('data-tooltip-setup')) return;
@@ -126,6 +159,15 @@
 			this.refreshingUsage = false;
 
 			this.domObserver = null;
+			this.sessionTooltip = null;
+			this.weeklyTooltip = null;
+			this.lastUsage = null;
+			try {
+				const val = localStorage.getItem('cc-show-local-time');
+				this.showLocalTime = val !== null ? val === 'true' : true;
+			} catch {
+				this.showLocalTime = true;
+			}
 		}
 
 		getProgressChrome() {
@@ -199,7 +241,12 @@
 
 				if (usageMissing && !usageReattachPending) {
 					usageReattachPending = true;
-					CC.waitForElement(CC.DOM.MODEL_SELECTOR_DROPDOWN, 60000).then((el) => {
+					CC.waitForAnyElement([
+						CC.DOM.MODEL_SELECTOR_DROPDOWN,
+						'[data-testid="chat-input-grid-container"]',
+						'[data-testid="chat-input-grid-area"]',
+						'textarea'
+					], 60000).then((el) => {
 						usageReattachPending = false;
 						if (el) this.attachUsageLine();
 					});
@@ -207,7 +254,11 @@
 
 				if (headerMissing && !headerReattachPending) {
 					headerReattachPending = true;
-					CC.waitForElement(CC.DOM.CHAT_MENU_TRIGGER, 60000).then((el) => {
+					CC.waitForAnyElement([
+						CC.DOM.CHAT_MENU_TRIGGER,
+						'header',
+						'[role="banner"]'
+					], 60000).then((el) => {
 						headerReattachPending = false;
 						if (el) this.attachHeader();
 					});
@@ -262,6 +313,19 @@
 
 			this.refreshProgressChrome();
 
+			const handleTimeClick = (e) => {
+				e.stopPropagation();
+				this.showLocalTime = !this.showLocalTime;
+				try {
+					localStorage.setItem('cc-show-local-time', this.showLocalTime);
+				} catch {}
+				if (this.lastUsage) {
+					this.setUsage(this.lastUsage);
+				}
+			};
+			this.sessionUsageSpan.addEventListener('click', handleTimeClick);
+			this.weeklyUsageSpan.addEventListener('click', handleTimeClick);
+
 			this.usageLine.addEventListener('click', async () => {
 				if (!this.onUsageRefresh || this.refreshingUsage) return;
 				this.refreshingUsage = true;
@@ -291,15 +355,17 @@
 				{ topOffset: 8 }
 			);
 
+			this.sessionTooltip = makeTooltip("5-hour session window.\nThe bar shows your usage.\nThe line marks where you are in the window.");
 			setupTooltip(
 				this.sessionGroup,
-				makeTooltip("5-hour session window.\nThe bar shows your usage.\nThe line marks where you are in the window."),
+				this.sessionTooltip,
 				{ topOffset: 8 }
 			);
 
+			this.weeklyTooltip = makeTooltip("7-day usage window.\nThe bar shows your usage.\nThe line marks where you are in the window.");
 			setupTooltip(
 				this.weeklyGroup,
-				makeTooltip("7-day usage window.\nThe bar shows your usage.\nThe line marks where you are in the window."),
+				this.weeklyTooltip,
 				{ topOffset: 8 }
 			);
 		}
@@ -311,9 +377,22 @@
 		}
 
 		attachHeader() {
+			let anchor = null;
 			const chatMenu = document.querySelector(CC.DOM.CHAT_MENU_TRIGGER);
-			if (!chatMenu) return;
-			const anchor = chatMenu.closest(CC.DOM.CHAT_PROJECT_WRAPPER) || chatMenu.parentElement;
+			if (chatMenu) {
+				anchor = chatMenu.closest(CC.DOM.CHAT_PROJECT_WRAPPER) || chatMenu.parentElement;
+			}
+
+			// Fallback: If chatMenu doesn't exist, we can look for other header or title wrapper elements
+			if (!anchor) {
+				const header = document.querySelector('header') || 
+				               document.querySelector('[role="banner"]') || 
+				               document.querySelector('.flex.items-center.justify-between');
+				if (header) {
+					anchor = header;
+				}
+			}
+
 			if (!anchor) return;
 			if (anchor.nextElementSibling !== this.headerContainer) {
 				anchor.after(this.headerContainer);
@@ -324,33 +403,34 @@
 
 		attachUsageLine() {
 			if (!this.usageLine) return;
-			const modelSelector = document.querySelector(CC.DOM.MODEL_SELECTOR_DROPDOWN);
-			if (!modelSelector) return;
-			const gridContainer = modelSelector.closest('[data-testid="chat-input-grid-container"]');
-			const gridArea = modelSelector.closest('[data-testid="chat-input-grid-area"]');
-			const findToolbarRow = (el, stopAt) => {
-				let cur = el;
-				while (cur && cur !== document.body) {
-					if (stopAt && cur === stopAt) break;
-					if (cur !== el && cur.nodeType === 1) {
-						const style = window.getComputedStyle(cur);
-						if (style.display === 'flex' && style.flexDirection === 'row') {
-							const buttons = cur.querySelectorAll('button').length;
-							if (buttons > 1) return cur;
-						}
-					}
-					cur = cur.parentElement;
-				}
-				return null;
-			};
+			let anchor = null;
 
-			const toolbarRow =
-				(gridContainer ? findToolbarRow(modelSelector, gridArea || gridContainer) : null) ||
-				findToolbarRow(modelSelector) ||
-				modelSelector.parentElement?.parentElement?.parentElement;
-			if (!toolbarRow) return;
-			if (toolbarRow.nextElementSibling !== this.usageLine) {
-				toolbarRow.after(this.usageLine);
+			// 1. Find the outer input card / container
+			const inputContainer =
+				document.querySelector(CC.DOM.CHAT_INPUT_CONTAINER) ||
+				document.querySelector(CC.DOM.CHAT_INPUT_AREA) ||
+				document.querySelector('form:has(textarea)') ||
+				document.querySelector('textarea')?.closest('form') ||
+				document.querySelector('textarea')?.closest('fieldset') ||
+				document.querySelector('textarea')?.closest('.relative');
+
+			if (inputContainer) {
+				anchor = inputContainer;
+			} else {
+				// Fallback via model selector's top card container
+				const modelSelector = document.querySelector(CC.DOM.MODEL_SELECTOR_DROPDOWN);
+				if (modelSelector) {
+					anchor =
+						modelSelector.closest('[data-testid="chat-input-grid-container"]') ||
+						modelSelector.closest('form') ||
+						modelSelector.closest('fieldset') ||
+						modelSelector.parentElement?.parentElement?.parentElement;
+				}
+			}
+
+			if (!anchor) return;
+			if (anchor.nextElementSibling !== this.usageLine) {
+				anchor.after(this.usageLine);
 			}
 			this.refreshProgressChrome();
 		}
@@ -453,6 +533,7 @@
 		}
 
 		setUsage(usage) {
+			this.lastUsage = usage;
 			this.refreshProgressChrome();
 			const session = usage?.five_hour || null;
 			const weekly = usage?.seven_day || null;
@@ -465,7 +546,16 @@
 				const pct = Math.round(rawPct * 10) / 10;
 				this.sessionResetMs = session.resets_at ? Date.parse(session.resets_at) : null;
 				this.sessionWindowStartMs = this.sessionResetMs ? this.sessionResetMs - 5 * 60 * 60 * 1000 : null;
-				const resetText = this.sessionResetMs ? ` · resets in ${formatResetCountdown(this.sessionResetMs)}` : '';
+				
+				let resetText = '';
+				if (this.sessionResetMs) {
+					if (this.showLocalTime) {
+						const localTime = formatLocalTime(this.sessionResetMs);
+						resetText = localTime ? ` · resets ${localTime}` : '';
+					} else {
+						resetText = ` · resets in ${formatResetCountdown(this.sessionResetMs)}`;
+					}
+				}
 				this.sessionUsageSpan.textContent = `Session: ${pct}%${resetText}`;
 
 				const width = Math.max(0, Math.min(100, rawPct));
@@ -492,7 +582,16 @@
 				const pct = Math.round(rawPct * 10) / 10;
 				this.weeklyResetMs = weekly.resets_at ? Date.parse(weekly.resets_at) : null;
 				this.weeklyWindowStartMs = this.weeklyResetMs ? this.weeklyResetMs - 7 * 24 * 60 * 60 * 1000 : null;
-				const resetText = this.weeklyResetMs ? ` · resets in ${formatResetCountdown(this.weeklyResetMs)}` : '';
+
+				let resetText = '';
+				if (this.weeklyResetMs) {
+					if (this.showLocalTime) {
+						const localTime = formatLocalTime(this.weeklyResetMs);
+						resetText = localTime ? ` · resets ${localTime}` : '';
+					} else {
+						resetText = ` · resets in ${formatResetCountdown(this.weeklyResetMs)}`;
+					}
+				}
 				this.weeklyUsageSpan.textContent = `Weekly: ${pct}%${resetText}`;
 
 				const width = Math.max(0, Math.min(100, rawPct));
@@ -508,6 +607,7 @@
 			}
 
 			this._updateMarkers();
+			this._updateTooltips();
 		}
 
 		_updateMarkers() {
@@ -536,6 +636,19 @@
 			}
 		}
 
+		_updateTooltips() {
+			if (this.sessionTooltip) {
+				const base = "5-hour session window.\nThe bar shows your usage.\nThe line marks where you are in the window.";
+				const fullTime = this.sessionResetMs ? getFullLocalResetString(this.sessionResetMs) : '';
+				this.sessionTooltip.textContent = fullTime ? `${base}\n\nNext session starts:\n${fullTime}` : base;
+			}
+			if (this.weeklyTooltip) {
+				const base = "7-day usage window.\nThe bar shows your usage.\nThe line marks where you are in the window.";
+				const fullTime = this.weeklyResetMs ? getFullLocalResetString(this.weeklyResetMs) : '';
+				this.weeklyTooltip.textContent = fullTime ? `${base}\n\nNext session starts:\n${fullTime}` : base;
+			}
+		}
+
 		tick() {
 			// Cache countdown
 			const now = Date.now();
@@ -554,22 +667,37 @@
 
 			// Reset countdown text + time markers
 			if (this.sessionResetMs && this.sessionUsageSpan?.textContent) {
-				const idx = this.sessionUsageSpan.textContent.indexOf('· resets in');
+				const idx = this.sessionUsageSpan.textContent.indexOf('· resets');
 				if (idx !== -1) {
-					const prefix = this.sessionUsageSpan.textContent.slice(0, idx + '· resets in '.length);
-					this.sessionUsageSpan.textContent = `${prefix}${formatResetCountdown(this.sessionResetMs)}`;
+					const prefix = this.sessionUsageSpan.textContent.slice(0, idx + '· resets'.length);
+					let suffix = '';
+					if (this.showLocalTime) {
+						const localTime = formatLocalTime(this.sessionResetMs);
+						suffix = localTime ? ` ${localTime}` : '';
+					} else {
+						suffix = ` in ${formatResetCountdown(this.sessionResetMs)}`;
+					}
+					this.sessionUsageSpan.textContent = `${prefix}${suffix}`;
 				}
 			}
 
 			if (this.weeklyResetMs && this.weeklyUsageSpan?.textContent) {
-				const idx = this.weeklyUsageSpan.textContent.indexOf('· resets in');
+				const idx = this.weeklyUsageSpan.textContent.indexOf('· resets');
 				if (idx !== -1) {
-					const prefix = this.weeklyUsageSpan.textContent.slice(0, idx + '· resets in '.length);
-					this.weeklyUsageSpan.textContent = `${prefix}${formatResetCountdown(this.weeklyResetMs)}`;
+					const prefix = this.weeklyUsageSpan.textContent.slice(0, idx + '· resets'.length);
+					let suffix = '';
+					if (this.showLocalTime) {
+						const localTime = formatLocalTime(this.weeklyResetMs);
+						suffix = localTime ? ` ${localTime}` : '';
+					} else {
+						suffix = ` in ${formatResetCountdown(this.weeklyResetMs)}`;
+					}
+					this.weeklyUsageSpan.textContent = `${prefix}${suffix}`;
 				}
 			}
 
 			this._updateMarkers();
+			this._updateTooltips();
 		}
 	}
 

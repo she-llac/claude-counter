@@ -38,11 +38,14 @@
 			handleEventStream(response);
 		}
 
-		// Catch conversation tree fetches
-		if (url && url.includes('/chat_conversations/') && url.includes('tree=')) {
-			const meta = getConversationMeta(url);
-			if (meta) {
-				handleConversationResponse(meta, response);
+		// Catch conversation fetches
+		if (url && url.includes('/chat_conversations/')) {
+			const method = (opts.method || 'GET').toUpperCase();
+			if (method === 'GET') {
+				const meta = getConversationMeta(url);
+				if (meta) {
+					handleConversationResponse(meta, response);
+				}
 			}
 		}
 
