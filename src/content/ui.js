@@ -3,6 +3,23 @@
 
 	const CC = (globalThis.ClaudeCounter = globalThis.ClaudeCounter || {});
 
+	const IS_ES = /^es\b/i.test(document.documentElement.lang || navigator.language || '');
+	const L = IS_ES
+		? {
+				session: 'Sesión',
+				weekly: 'Semana',
+				resetsIn: 'Se reinicia en',
+				sessionTip: 'Ventana de uso de 5 horas.\nLa barra muestra tu consumo; la línea vertical, cuánto pasó de la ventana.\nClic para actualizar.',
+				weeklyTip: 'Ventana de uso de 7 días.\nLa barra muestra tu consumo; la línea vertical, cuánto pasó de la ventana.\nClic para actualizar.'
+			}
+		: {
+				session: 'Session',
+				weekly: 'Week',
+				resetsIn: 'Resets in',
+				sessionTip: '5-hour session window.\nThe bar shows your usage; the tick marks elapsed time.\nClick to refresh.',
+				weeklyTip: '7-day usage window.\nThe bar shows your usage; the tick marks elapsed time.\nClick to refresh.'
+			};
+
 	function formatSeconds(totalSeconds) {
 		const minutes = Math.floor(totalSeconds / 60);
 		const seconds = totalSeconds % 60;
@@ -190,20 +207,12 @@
 
 		_observeDom() {
 			// Track pending reattach attempts independently
-			let usageReattachPending = false;
 			let headerReattachPending = false;
 
 			this.domObserver = new MutationObserver(() => {
-				const usageMissing = this.usageLine && !document.contains(this.usageLine);
+				// Re-place the usage row whenever it is missing or no longer in the right spot
+				if (this._usageMisplaced()) this._scheduleUsageReattach(150);
 				const headerMissing = !document.contains(this.headerContainer);
-
-				if (usageMissing && !usageReattachPending) {
-					usageReattachPending = true;
-					CC.waitForElement(CC.DOM.MODEL_SELECTOR_DROPDOWN, 60000).then((el) => {
-						usageReattachPending = false;
-						if (el) this.attachUsageLine();
-					});
-				}
 
 				if (headerMissing && !headerReattachPending) {
 					headerReattachPending = true;
@@ -218,48 +227,43 @@
 
 		_initUsageLine() {
 			this.usageLine = document.createElement('div');
-			this.usageLine.className =
-				'text-text-400 text-[11px] cc-usageRow cc-hidden flex flex-row items-center gap-3 w-full';
+			this.usageLine.className = 'cc-usageRow cc-hidden';
 
-			this.sessionUsageSpan = document.createElement('span');
-			this.sessionUsageSpan.className = 'cc-usageText';
+			const makeGroup = (label, extraClass) => {
+				const group = document.createElement('div');
+				group.className = `cc-usageGroup ${extraClass}`;
+				const labelEl = Object.assign(document.createElement('span'), { className: 'cc-usageLabel', textContent: label });
+				const bar = document.createElement('div');
+				bar.className = 'cc-bar cc-bar--usage';
+				const fill = document.createElement('div');
+				fill.className = 'cc-bar__fill';
+				const marker = document.createElement('div');
+				marker.className = 'cc-bar__marker cc-hidden';
+				bar.append(fill, marker);
+				const pct = Object.assign(document.createElement('span'), { className: 'cc-usagePct' });
+				const reset = Object.assign(document.createElement('span'), { className: 'cc-usageReset' });
+				group.append(labelEl, bar, pct, reset);
+				return { group, bar, fill, marker, pct, reset };
+			};
 
-			this.sessionBar = document.createElement('div');
-			this.sessionBar.className = 'cc-bar cc-bar--usage';
-			this.sessionBarFill = document.createElement('div');
-			this.sessionBarFill.className = 'cc-bar__fill';
-			this.sessionMarker = document.createElement('div');
-			this.sessionMarker.className = 'cc-bar__marker cc-hidden';
-			this.sessionMarker.style.left = '0%';
-			this.sessionBar.appendChild(this.sessionBarFill);
-			this.sessionBar.appendChild(this.sessionMarker);
+			const sess = makeGroup(L.session, 'cc-usageGroup--session');
+			const week = makeGroup(L.weekly, 'cc-usageGroup--weekly');
 
-			this.weeklyUsageSpan = document.createElement('span');
-			this.weeklyUsageSpan.className = 'cc-usageText';
+			this.sessionGroup = sess.group;
+			this.sessionBar = sess.bar;
+			this.sessionBarFill = sess.fill;
+			this.sessionMarker = sess.marker;
+			this.sessionUsageSpan = sess.pct;
+			this.sessionResetSpan = sess.reset;
 
-			this.weeklyBar = document.createElement('div');
-			this.weeklyBar.className = 'cc-bar cc-bar--usage';
-			this.weeklyBarFill = document.createElement('div');
-			this.weeklyBarFill.className = 'cc-bar__fill';
-			this.weeklyMarker = document.createElement('div');
-			this.weeklyMarker.className = 'cc-bar__marker cc-hidden';
-			this.weeklyMarker.style.left = '0%';
-			this.weeklyBar.appendChild(this.weeklyBarFill);
-			this.weeklyBar.appendChild(this.weeklyMarker);
+			this.weeklyGroup = week.group;
+			this.weeklyBar = week.bar;
+			this.weeklyBarFill = week.fill;
+			this.weeklyMarker = week.marker;
+			this.weeklyUsageSpan = week.pct;
+			this.weeklyResetSpan = week.reset;
 
-			this.sessionGroup = document.createElement('div');
-			this.sessionGroup.className = 'cc-usageGroup';
-			this.sessionGroup.appendChild(this.sessionUsageSpan);
-			this.sessionGroup.appendChild(this.sessionBar);
-
-			this.weeklyGroup = document.createElement('div');
-			this.weeklyGroup.className = 'cc-usageGroup cc-usageGroup--weekly';
-			this.weeklyGroup.appendChild(this.weeklyBar);
-			this.weeklyGroup.appendChild(this.weeklyUsageSpan);
-
-			this.usageLine.appendChild(this.sessionGroup);
-			this.usageLine.appendChild(this.weeklyGroup);
-
+			this.usageLine.append(this.sessionGroup, this.weeklyGroup);
 			this.refreshProgressChrome();
 
 			this.usageLine.addEventListener('click', async () => {
@@ -293,13 +297,13 @@
 
 			setupTooltip(
 				this.sessionGroup,
-				makeTooltip("5-hour session window.\nThe bar shows your usage.\nThe line marks where you are in the window."),
+				makeTooltip(L.sessionTip),
 				{ topOffset: 8 }
 			);
 
 			setupTooltip(
 				this.weeklyGroup,
-				makeTooltip("7-day usage window.\nThe bar shows your usage.\nThe line marks where you are in the window."),
+				makeTooltip(L.weeklyTip),
 				{ topOffset: 8 }
 			);
 		}
@@ -326,33 +330,152 @@
 			if (!this.usageLine) return;
 			const modelSelector = document.querySelector(CC.DOM.MODEL_SELECTOR_DROPDOWN);
 			if (!modelSelector) return;
-			const gridContainer = modelSelector.closest('[data-testid="chat-input-grid-container"]');
-			const gridArea = modelSelector.closest('[data-testid="chat-input-grid-area"]');
-			const findToolbarRow = (el, stopAt) => {
-				let cur = el;
-				while (cur && cur !== document.body) {
-					if (stopAt && cur === stopAt) break;
-					if (cur !== el && cur.nodeType === 1) {
-						const style = window.getComputedStyle(cur);
-						if (style.display === 'flex' && style.flexDirection === 'row') {
-							const buttons = cur.querySelectorAll('button').length;
-							if (buttons > 1) return cur;
-						}
-					}
-					cur = cur.parentElement;
+
+			// The composer toolbars are absolutely positioned inside the input, so the row
+			// must live OUTSIDE the visible composer box. Preferred spot: the right side of
+			// claude.ai's own strip under the box (the "chin": Manual · Output / icons), so
+			// we don't add any vertical space. Fallback: a compact line right below.
+			const box = this._findComposerBox(modelSelector);
+			if (!box || !box.parentElement) {
+				this._scheduleUsageReattach(300);
+				return;
+			}
+
+			if (this._usageAnchor && this._usageAnchor !== box) this._usageAnchor.removeAttribute('data-cc-anchor');
+			this._usageAnchor = box;
+			box.setAttribute('data-cc-anchor', '1');
+
+			const chin = this._findChin(box);
+			this._placeUsage(box, chin, chin ? 'chin' : 'below');
+			this._fitUsage();
+			this._observeFit();
+			this.refreshProgressChrome();
+		}
+
+		_findChin(box) {
+			const next = box.nextElementSibling;
+			if (!next || next === this.usageLine) return null;
+			const style = window.getComputedStyle(next);
+			if (style.display === 'none' || style.position === 'absolute' || style.position === 'fixed') return null;
+			const h = next.getBoundingClientRect().height;
+			if (h < 20 || h > 90) return null;
+			return next;
+		}
+
+		_placeUsage(box, chin, mode) {
+			const row = this.usageLine;
+			row.classList.toggle('cc-usageRow--chin', mode === 'chin');
+			row.classList.toggle('cc-usageRow--below', mode !== 'chin');
+			if (mode === 'chin') {
+				if (row.parentElement !== chin) chin.appendChild(row);
+				this._usageParent = chin;
+			} else {
+				const after = mode === 'afterChin' && chin ? chin : box;
+				if (after.nextElementSibling !== row) after.after(row);
+				this._usageParent = after.parentElement;
+			}
+			this._usageMode = mode;
+			this._usageChin = chin;
+		}
+
+		// Make sure the row never collides with claude.ai's own chin content.
+		_fitUsage() {
+			const row = this.usageLine;
+			if (!row || row.classList.contains('cc-hidden')) return;
+			const box = this._usageAnchor;
+			const chin = this._usageChin;
+			row.classList.remove('cc-compact');
+
+			if (!chin) {
+				if (this._usageMode !== 'below') this._placeUsage(box, null, 'below');
+				return;
+			}
+			if (this._usageMode !== 'chin') this._placeUsage(box, chin, 'chin');
+
+			const collides = () => {
+				const rr = row.getBoundingClientRect();
+				let rightmost = chin.getBoundingClientRect().left;
+				for (const el of chin.querySelectorAll('button, a, [role="tab"], [role="button"]')) {
+					if (row.contains(el)) continue;
+					const r = el.getBoundingClientRect();
+					if (r.width && r.height) rightmost = Math.max(rightmost, r.right);
 				}
-				return null;
+				return rr.left < rightmost + 16;
 			};
 
-			const toolbarRow =
-				(gridContainer ? findToolbarRow(modelSelector, gridArea || gridContainer) : null) ||
-				findToolbarRow(modelSelector) ||
-				modelSelector.parentElement?.parentElement?.parentElement;
-			if (!toolbarRow) return;
-			if (toolbarRow.nextElementSibling !== this.usageLine) {
-				toolbarRow.after(this.usageLine);
+			if (!collides()) return;
+			row.classList.add('cc-compact');
+			if (!collides()) return;
+			row.classList.remove('cc-compact');
+			this._placeUsage(box, chin, 'afterChin');
+		}
+
+		_observeFit() {
+			if (this._fitObserver) this._fitObserver.disconnect();
+			if (!('ResizeObserver' in window) || !this._usageAnchor) return;
+			let raf = 0;
+			this._fitObserver = new ResizeObserver(() => {
+				cancelAnimationFrame(raf);
+				raf = requestAnimationFrame(() => this._fitUsage());
+			});
+			this._fitObserver.observe(this._usageAnchor);
+			if (this._usageChin) this._fitObserver.observe(this._usageChin);
+		}
+
+		_scheduleUsageReattach(delay = 200) {
+			if (this._usageReattachTimer) return;
+			this._usageReattachTimer = setTimeout(() => {
+				this._usageReattachTimer = null;
+				this.attachUsageLine();
+			}, delay);
+		}
+
+		_usageMisplaced() {
+			if (!this.usageLine) return false;
+			const ms = document.querySelector(CC.DOM.MODEL_SELECTOR_DROPDOWN);
+			if (!ms) return false; // no composer on this page
+			if (!document.contains(this.usageLine)) return true;
+			const box = this._usageAnchor;
+			if (!box || !document.contains(box) || !box.contains(ms)) return true;
+			if (this.usageLine.parentElement !== this._usageParent) return true;
+			// claude.ai rendered its chin after we placed the row below the box
+			if (this._usageMode === 'below' && this._findChin(box)) return true;
+			return false;
+		}
+
+		_findComposerBox(modelSelector) {
+			const editor =
+				document.querySelector('[data-testid="chat-input"]') ||
+				document.querySelector('.ProseMirror[contenteditable="true"]') ||
+				document.querySelector('[contenteditable="true"]') ||
+				document.querySelector('fieldset textarea, form textarea');
+			if (!editor) return null;
+
+			// Lowest common ancestor of editor and model selector.
+			// Note: claude.ai positions the toolbars ABSOLUTELY at the bottom of this
+			// element, so anything inserted inside it gets covered by the buttons.
+			let lca = modelSelector.parentElement;
+			while (lca && !lca.contains(editor)) lca = lca.parentElement;
+			if (!lca || lca === document.body || lca === document.documentElement) return null;
+
+			// Climb to the visible composer box (rounded + background/border/shadow)
+			// and insert the usage row AFTER it, i.e. outside and below the box.
+			const isVisualBox = (el) => {
+				const s = window.getComputedStyle(el);
+				const radius = parseFloat(s.borderTopLeftRadius) || 0;
+				const hasBg = s.backgroundColor && s.backgroundColor !== 'rgba(0, 0, 0, 0)' && s.backgroundColor !== 'transparent';
+				const hasBorder = (parseFloat(s.borderTopWidth) || 0) > 0;
+				const hasShadow = s.boxShadow && s.boxShadow !== 'none';
+				return radius >= 8 && (hasBg || hasBorder || hasShadow);
+			};
+			let box = lca;
+			for (let i = 0; i < 8 && box && box !== document.body; i++) {
+				if (box.tagName === 'FIELDSET' || box.tagName === 'FORM') break;
+				if (isVisualBox(box)) return box;
+				box = box.parentElement;
 			}
-			this.refreshProgressChrome();
+			// Fallback: just outside the toolbar's positioning context
+			return lca.parentElement && lca.parentElement !== document.body ? lca : null;
 		}
 
 		setPendingCache(pending) {
@@ -456,58 +579,39 @@
 			this.refreshProgressChrome();
 			const session = usage?.five_hour || null;
 			const weekly = usage?.seven_day || null;
-			const hasAnyUsage =
-				!!(session && typeof session.utilization === 'number') || !!(weekly && typeof weekly.utilization === 'number');
-			this.usageLine?.classList.toggle('cc-hidden', !hasAnyUsage);
+			const hasSession = !!(session && typeof session.utilization === 'number');
+			const hasWeekly = !!(weekly && typeof weekly.utilization === 'number');
+			const wasHidden = this.usageLine?.classList.contains('cc-hidden');
+			this.usageLine?.classList.toggle('cc-hidden', !hasSession && !hasWeekly);
 
-			if (session && typeof session.utilization === 'number') {
-				const rawPct = session.utilization;
-				const pct = Math.round(rawPct * 10) / 10;
-				this.sessionResetMs = session.resets_at ? Date.parse(session.resets_at) : null;
-				this.sessionWindowStartMs = this.sessionResetMs ? this.sessionResetMs - 5 * 60 * 60 * 1000 : null;
-				const resetText = this.sessionResetMs ? ` · resets in ${formatResetCountdown(this.sessionResetMs)}` : '';
-				this.sessionUsageSpan.textContent = `Session: ${pct}%${resetText}`;
+			const apply = (win, { group, fill, pct, reset }, hours) => {
+				if (!win || typeof win.utilization !== 'number') {
+					group.classList.add('cc-hidden');
+					return { resetMs: null, startMs: null };
+				}
+				group.classList.remove('cc-hidden');
+				const raw = Math.max(0, Math.min(100, win.utilization));
+				pct.textContent = `${raw < 10 ? Math.round(raw * 10) / 10 : Math.round(raw)}%`;
+				fill.style.width = `${raw}%`;
+				fill.classList.toggle('cc-caution', raw >= 75 && raw < 90);
+				fill.classList.toggle('cc-warn', raw >= 90);
+				fill.classList.toggle('cc-full', raw >= 99.5);
+				const resetMs = win.resets_at ? Date.parse(win.resets_at) : null;
+				reset.textContent = resetMs ? formatResetCountdown(resetMs) : '';
+				reset.title = resetMs ? `${L.resetsIn} ${formatResetCountdown(resetMs)}` : '';
+				return { resetMs, startMs: resetMs ? resetMs - hours * 3600 * 1000 : null };
+			};
 
-				const width = Math.max(0, Math.min(100, rawPct));
-				this.sessionBarFill.style.width = `${width}%`;
-				this.sessionBarFill.classList.toggle('cc-warn', width >= 90);
-				this.sessionBarFill.classList.toggle('cc-full', width >= 99.5);
-			} else {
-				this.sessionUsageSpan.textContent = '';
-				this.sessionBarFill.style.width = '0%';
-				this.sessionBarFill.classList.remove('cc-warn', 'cc-full');
-				this.sessionResetMs = null;
-				this.sessionWindowStartMs = null;
-			}
+			const s1 = apply(session, { group: this.sessionGroup, fill: this.sessionBarFill, pct: this.sessionUsageSpan, reset: this.sessionResetSpan }, 5);
+			this.sessionResetMs = s1.resetMs;
+			this.sessionWindowStartMs = s1.startMs;
 
-			const hasWeekly = weekly && typeof weekly.utilization === 'number';
-			this.weeklyGroup?.classList.toggle('cc-hidden', !hasWeekly);
-			this.sessionGroup?.classList.toggle('cc-usageGroup--single', !hasWeekly);
-
-			if (hasWeekly) {
-				this.weeklyUsageSpan.classList.remove('cc-hidden');
-				this.weeklyBar.classList.remove('cc-hidden');
-
-				const rawPct = weekly.utilization;
-				const pct = Math.round(rawPct * 10) / 10;
-				this.weeklyResetMs = weekly.resets_at ? Date.parse(weekly.resets_at) : null;
-				this.weeklyWindowStartMs = this.weeklyResetMs ? this.weeklyResetMs - 7 * 24 * 60 * 60 * 1000 : null;
-				const resetText = this.weeklyResetMs ? ` · resets in ${formatResetCountdown(this.weeklyResetMs)}` : '';
-				this.weeklyUsageSpan.textContent = `Weekly: ${pct}%${resetText}`;
-
-				const width = Math.max(0, Math.min(100, rawPct));
-				this.weeklyBarFill.style.width = `${width}%`;
-				this.weeklyBarFill.classList.toggle('cc-warn', width >= 90);
-				this.weeklyBarFill.classList.toggle('cc-full', width >= 99.5);
-			} else {
-				this.weeklyUsageSpan.classList.add('cc-hidden');
-				this.weeklyBar.classList.add('cc-hidden');
-				this.weeklyResetMs = null;
-				this.weeklyWindowStartMs = null;
-				this.weeklyBarFill.classList.remove('cc-warn', 'cc-full');
-			}
+			const s2 = apply(weekly, { group: this.weeklyGroup, fill: this.weeklyBarFill, pct: this.weeklyUsageSpan, reset: this.weeklyResetSpan }, 24 * 7);
+			this.weeklyResetMs = s2.resetMs;
+			this.weeklyWindowStartMs = s2.startMs;
 
 			this._updateMarkers();
+			if (wasHidden) requestAnimationFrame(() => this._fitUsage());
 		}
 
 		_updateMarkers() {
@@ -552,21 +656,12 @@
 				this._renderHeader();
 			}
 
-			// Reset countdown text + time markers
-			if (this.sessionResetMs && this.sessionUsageSpan?.textContent) {
-				const idx = this.sessionUsageSpan.textContent.indexOf('· resets in');
-				if (idx !== -1) {
-					const prefix = this.sessionUsageSpan.textContent.slice(0, idx + '· resets in '.length);
-					this.sessionUsageSpan.textContent = `${prefix}${formatResetCountdown(this.sessionResetMs)}`;
-				}
+			// Reset countdowns + time markers
+			if (this.sessionResetMs && this.sessionResetSpan) {
+				this.sessionResetSpan.textContent = formatResetCountdown(this.sessionResetMs);
 			}
-
-			if (this.weeklyResetMs && this.weeklyUsageSpan?.textContent) {
-				const idx = this.weeklyUsageSpan.textContent.indexOf('· resets in');
-				if (idx !== -1) {
-					const prefix = this.weeklyUsageSpan.textContent.slice(0, idx + '· resets in '.length);
-					this.weeklyUsageSpan.textContent = `${prefix}${formatResetCountdown(this.weeklyResetMs)}`;
-				}
+			if (this.weeklyResetMs && this.weeklyResetSpan) {
+				this.weeklyResetSpan.textContent = formatResetCountdown(this.weeklyResetMs);
 			}
 
 			this._updateMarkers();

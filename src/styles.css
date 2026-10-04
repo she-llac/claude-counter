@@ -8,37 +8,95 @@
 	white-space: nowrap;
 }
 
-/* Usage row: session + weekly */
+/* Usage row: session + weekly
+   Design: quiet, compact, tabular. Lives on the right side of claude.ai's strip
+   under the composer (same line as "Manual · Output"), so it adds no height. */
 .cc-usageRow {
-	position: relative;
-	z-index: 50;
+	--cc-text: hsl(var(--text-500, 40 3% 47%));
+	--cc-text-strong: hsl(var(--text-300, 40 5% 30%));
+	display: flex;
+	align-items: center;
+	gap: 18px;
+	font-family: inherit;
+	font-size: 12px;
+	line-height: 16px;
+	letter-spacing: 0.01em;
+	font-variant-numeric: tabular-nums;
+	color: var(--cc-text);
 	cursor: pointer;
 	user-select: none;
 	transition: opacity 150ms ease;
+	white-space: nowrap;
+}
+
+.cc-usageRow:hover {
+	--cc-text: hsl(var(--text-400, 40 3% 40%));
+}
+
+/* Overlay on the right of the chin: chin has pt-2 (8px) + a 32px content row */
+.cc-usageRow--chin {
+	position: absolute;
+	top: 8px;
+	right: 12px;
+	height: 32px;
+	z-index: 1;
+}
+
+/* Fallback: own compact line below the composer */
+.cc-usageRow--below {
+	box-sizing: border-box;
+	justify-content: flex-end;
+	flex-wrap: wrap;
+	row-gap: 4px;
+	width: 100%;
+	min-width: 0;
+	padding: 6px 12px 0;
 }
 
 .cc-usageRow--dim {
-	opacity: 0.6;
+	opacity: 0.55;
 }
 
 .cc-usageGroup {
-	display: flex;
+	display: inline-flex;
 	align-items: center;
 	gap: 8px;
-	flex: 1;
-	min-width: 0;
+	flex: 0 0 auto;
 }
 
-.cc-usageGroup--single {
-	width: 100%;
+.cc-usageLabel {
+	color: var(--cc-text);
 }
 
-.cc-usageGroup--weekly {
-	justify-content: flex-end;
+.cc-usagePct {
+	color: var(--cc-text-strong);
+	font-weight: 500;
+	min-width: 3ch;
+	text-align: right;
 }
 
-.cc-usageText {
-	white-space: nowrap;
+.cc-usageReset {
+	color: var(--cc-text);
+	opacity: 0.8;
+}
+
+.cc-usageReset::before {
+	content: '·';
+	margin-right: 6px;
+	opacity: 0.7;
+}
+
+.cc-usageReset:empty {
+	display: none;
+}
+
+/* Narrow layouts: drop the reset countdown (still in the tooltip / title) */
+.cc-compact .cc-usageReset {
+	display: none;
+}
+
+.cc-compact {
+	gap: 12px;
 }
 
 /* Bars (mini + usage) */
@@ -95,9 +153,36 @@
 	--cc-radius: 2px;
 }
 
-.cc-bar--usage {
-	height: 10px;
-	flex: 1;
+/* Usage bars: slim pill, no outline, track derived from text colour */
+.cc-bar.cc-bar--usage {
+	--cc-radius: 999px;
+	width: 64px;
+	height: 4px;
+	flex: 0 0 64px;
+	border: none;
+	background: color-mix(in srgb, currentColor 22%, transparent);
+}
+
+.cc-bar--usage .cc-bar__fill {
+	border-radius: 999px;
+}
+
+.cc-bar--usage .cc-bar__fill.cc-caution {
+	background: #d4a017;
+}
+
+.cc-bar--usage .cc-bar__fill.cc-warn {
+	background: var(--cc-fill-warn);
+}
+
+.cc-bar--usage .cc-bar__marker {
+	top: -3px;
+	bottom: -3px;
+	width: 1.5px;
+	margin-left: -0.75px;
+	border-radius: 1px;
+	background: var(--cc-text-strong);
+	opacity: 0.85;
 }
 
 /* Tooltips */

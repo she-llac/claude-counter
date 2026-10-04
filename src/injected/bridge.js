@@ -3,6 +3,11 @@
 
 	const CC_MARKER = 'ClaudeCounter';
 
+	// The bridge may be loaded twice (MAIN-world content script at document_start
+	// + legacy <script> injection). Only wrap fetch once.
+	if (window.__ccBridgeLoaded) return;
+	window.__ccBridgeLoaded = true;
+
 	// Capture original fetch before anyone else can wrap it
 	const originalFetch = window.fetch;
 
@@ -25,9 +30,10 @@
 	window.fetch = async (...args) => {
 		const url = toAbsoluteUrl(args[0]);
 		const opts = args[1] || {};
+		const method = (opts.method || (args[0] instanceof Request ? args[0].method : 'GET') || 'GET').toUpperCase();
 
 		// Detect generation start (completion requests)
-		if (url && opts.method === 'POST' && (url.includes('/completion') || url.includes('/retry_completion'))) {
+		if (url && method === 'POST' && (url.includes('/completion') || url.includes('/retry_completion'))) {
 			post('cc:generation_start', {});
 		}
 
@@ -36,6 +42,8 @@
 		const contentType = response.headers.get('content-type') || '';
 		if (contentType.includes('event-stream')) {
 			handleEventStream(response);
+			// Usage changes after every message: let the content script schedule a /usage refresh
+			if (method === 'POST') post('cc:stream_started', {});
 		}
 
 		// Catch conversation tree fetches
@@ -114,8 +122,9 @@
 					if (!raw) continue;
 					try {
 						const json = JSON.parse(raw);
-						if (json?.type === 'message_limit' && json.message_limit) {
-							post('cc:message_limit', json.message_limit);
+						const ml = json?.message_limit || (json?.type === 'message_limit' ? json : null);
+						if (ml && typeof ml === 'object') {
+							post('cc:message_limit', ml);
 						}
 					} catch {
 						// ignore

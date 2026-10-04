@@ -218,6 +218,23 @@
 	CC.bridge.on('cc:conversation', handleConversationPayload);
 	CC.bridge.on('cc:message_limit', handleMessageLimit);
 
+	// Refresh /usage shortly after a response starts streaming, in case the
+	// SSE stream no longer carries message_limit data.
+	CC.bridge.on('cc:stream_started', () => {
+		setTimeout(() => refreshUsageIfStale(5000), 20000);
+		setTimeout(() => refreshUsageIfStale(5000), 60000);
+	});
+
+	function refreshUsageIfStale(maxAgeMs) {
+		if (Date.now() - lastUsageUpdateMs >= maxAgeMs) refreshUsage();
+	}
+
+	// Refresh when the tab becomes visible / focused again (Edge sleeping tabs, etc.)
+	document.addEventListener('visibilitychange', () => {
+		if (!document.hidden) refreshUsageIfStale(60 * 1000);
+	});
+	window.addEventListener('focus', () => refreshUsageIfStale(60 * 1000));
+
 	async function handleUrlChange() {
 		currentConversationId = getConversationId();
 
@@ -232,6 +249,7 @@
 
 		if (!currentConversationId) {
 			ui.setConversationMetrics();
+			if (!usageState || Date.now() - lastUsageUpdateMs > 2 * 60 * 1000) refreshUsage();
 			return;
 		}
 
@@ -240,8 +258,8 @@
 
 		await refreshConversation();
 
-		// Usage is org-level, not conversation-level. Only fetch on first load or if stale.
-		if (!usageState) await refreshUsage();
+		// Usage is org-level, not conversation-level. Fetch on first load or if stale (>2 min).
+		if (!usageState || Date.now() - lastUsageUpdateMs > 2 * 60 * 1000) await refreshUsage();
 	}
 
 	const unobserveUrl = observeUrlChanges(handleUrlChange);
@@ -303,11 +321,12 @@
 			refreshUsage();
 		}
 
-		// Optional hourly safety refresh.
-		const ONE_HOUR_MS = 60 * 60 * 1000;
-		const sseAge = now - lastUsageSseMs;
+		// Periodic safety refresh every 5 minutes while the tab is visible
+		// (was 1 hour, which made the bars look frozen).
+		const REFRESH_MS = 5 * 60 * 1000;
 		const anyAge = now - lastUsageUpdateMs;
-		if (!document.hidden && sseAge > ONE_HOUR_MS && anyAge > ONE_HOUR_MS) {
+		if (!document.hidden && anyAge > REFRESH_MS) {
+			lastUsageUpdateMs = now; // throttle retries if the request fails
 			refreshUsage();
 		}
 	}

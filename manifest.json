@@ -31,6 +31,12 @@
   "content_scripts": [
     {
       "matches": ["https://claude.ai/*"],
+      "js": ["src/injected/bridge.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["https://claude.ai/*"],
       "css": ["src/styles.css"],
       "js": [
         "src/content/constants.js",
