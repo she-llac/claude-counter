@@ -1,7 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Claude Counter",
-  "version": "0.4.2",
+  "version": "2.1.0",
+  "minimum_chrome_version": "111",
   "browser_specific_settings": {
     "gecko": {
       "id": "{236c6889-52b6-4454-bc4b-5a2ad18effa2}",
@@ -10,6 +11,7 @@
     }
   },
   "description": "Shows ~token count, cache timer, and native session/weekly usage bars on claude.ai.",
+  "permissions": ["storage"],
   "icons": {
     "16": "icons/icon16.png",
     "32": "icons/icon32.png",
@@ -29,6 +31,12 @@
     }
   },
   "content_scripts": [
+    {
+      "matches": ["https://claude.ai/*"],
+      "js": ["src/injected/bridge.js"],
+      "world": "MAIN",
+      "run_at": "document_start"
+    },
     {
       "matches": ["https://claude.ai/*"],
       "css": ["src/styles.css"],

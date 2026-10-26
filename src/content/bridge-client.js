@@ -15,11 +15,16 @@
 		constructor() {
 			this._pending = new Map();
 			this._listeners = new Map();
+			this.isReady = document.documentElement?.dataset?.ccBridgeReady === 'true';
 
 			window.addEventListener('message', (event) => {
 				if (event.source !== window) return;
 				const data = event.data;
 				if (!data || data.cc !== 'ClaudeCounter') return;
+
+				if (data.type === 'cc:bridge_ready') {
+					this.isReady = true;
+				}
 
 				if (data.type === 'cc:response') {
 					const { requestId, ok, payload, error } = data;
@@ -51,7 +56,7 @@
 			return () => this._listeners.get(type)?.delete(fn);
 		}
 
-		request(kind, payload, { timeoutMs = 10000 } = {}) {
+		request(kind, payload, { timeoutMs = 5000 } = {}) {
 			const requestId = makeRequestId();
 			return new Promise((resolve, reject) => {
 				const timeoutId = setTimeout(() => {
@@ -74,15 +79,15 @@
 		}
 
 		async requestUsage(orgId) {
-			return this.request('usage', { orgId }, { timeoutMs: 15000 });
+			return this.request('usage', { orgId }, { timeoutMs: 5000 });
 		}
 
 		async requestConversation(orgId, conversationId) {
-			return this.request('conversation', { orgId, conversationId }, { timeoutMs: 20000 });
+			return this.request('conversation', { orgId, conversationId }, { timeoutMs: 7000 });
 		}
 
 		async requestHash(text) {
-			return this.request('hash', { text }, { timeoutMs: 5000 });
+			return this.request('hash', { text }, { timeoutMs: 3000 });
 		}
 	}
 
@@ -90,6 +95,10 @@
 
 	function injectBridgeOnce() {
 		if (bridgeReadyPromise) return bridgeReadyPromise;
+
+		if (document.documentElement?.dataset?.ccBridgeReady === 'true') {
+			return Promise.resolve(true);
+		}
 
 		const runtime = getRuntime();
 		if (!runtime) return Promise.resolve(false);
@@ -99,12 +108,24 @@
 		}
 
 		bridgeReadyPromise = new Promise((resolve) => {
-			const script = document.createElement('script');
-			script.id = CC.DOM.BRIDGE_SCRIPT_ID;
-			script.src = runtime.getURL('src/injected/bridge.js');
-			script.onload = () => resolve(true);
-			script.onerror = () => resolve(false);
-			(document.head || document.documentElement).appendChild(script);
+			const timeoutId = setTimeout(() => resolve(false), 2000);
+			try {
+				const script = document.createElement('script');
+				script.id = CC.DOM.BRIDGE_SCRIPT_ID;
+				script.src = runtime.getURL('src/injected/bridge.js');
+				script.onload = () => {
+					clearTimeout(timeoutId);
+					resolve(true);
+				};
+				script.onerror = () => {
+					clearTimeout(timeoutId);
+					resolve(false);
+				};
+				(document.head || document.documentElement).appendChild(script);
+			} catch {
+				clearTimeout(timeoutId);
+				resolve(false);
+			}
 		});
 
 		return bridgeReadyPromise;

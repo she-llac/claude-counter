@@ -1,0 +1,74 @@
+{
+  "_comment": "Real StreamTimeline frames captured on a Free account (Chrome, 2026-10-11). Conversation, block and session ids are anonymised; no account data. The protocol digest with all notes lives outside the repo (Google Drive, claude-counter-fixtures-v2.json).",
+  "frames": {
+    "limits_7d_first": {
+      "hex": "00000000770a7552110a0f313739313734333536333636382d305801225e0801280032176f7665726167655f6e6f745f70726f766973696f6e65644a09666976655f686f75726a190a02376412130801120608f0b1bed60619000000000000d03f6a190a0235681213080112060898daafd6061952b81e85eb51e83f"
+    },
+    "limits_5h_first": {
+      "hex": "00000000770a7552110a0f313739313734333936373532352d305802225e0801280032176f7665726167655f6e6f745f70726f766973696f6e65644a09666976655f686f75726a190a0235681213080112060898daafd6061952b81e85eb51e83f6a190a02376412130801120608f0b1bed60619000000000000d03f"
+    },
+    "limits_5h_first_turn2": {
+      "hex": "00000000770a7552110a0f313739313734343132303630362d305802225e0801280032176f7665726167655f6e6f745f70726f766973696f6e65644a09666976655f686f75726a190a0235681213080112060898daafd6061952b81e85eb51e83f6a190a02376412130801120608f0b1bed60619000000000000d03f"
+    },
+    "keepalive": {
+      "hex": "00000000040a023200"
+    },
+    "text_delta_emoji": {
+      "hex": "000000003e0a3c52110a0f313739313734333536333636312d30580112250a1d63626c6b5f3030303030303030303030303030303030303030303030301204f09f918b"
+    },
+    "end_cadence": {
+      "hex": "02000000307b226d65746164617461223a7b2253747265616d2d436c6f73652d526561736f6e223a5b22636164656e6365225d7d7d"
+    }
+  },
+  "expected_limits": {
+    "5h": {
+      "utilization": 0.76,
+      "resets_at": 1791749400
+    },
+    "7d": {
+      "utilization": 0.25,
+      "resets_at": 1791990000
+    },
+    "representativeClaim": "five_hour",
+    "overageDisabledReason": "overage_not_provisioned"
+  },
+  "old_sse_message_limit": {
+    "type": "message_limit",
+    "message_limit": {
+      "type": "within_limit",
+      "resetsAt": null,
+      "remaining": null,
+      "perModelLimit": null,
+      "representativeClaim": "five_hour",
+      "overageDisabledReason": "overage_not_provisioned",
+      "overageInUse": false,
+      "windows": {
+        "5h": {
+          "status": "within_limit",
+          "resets_at": 1791750000,
+          "utilization": 0.2
+        },
+        "7d": {
+          "status": "within_limit",
+          "resets_at": 1792116000,
+          "utilization": 0.12
+        }
+      },
+      "resolved": {
+        "status": "ok",
+        "limit": {
+          "kind": "session",
+          "group": "session",
+          "percent": 20,
+          "severity": "normal",
+          "resets_at": "2026-10-11T20:20:00+00:00",
+          "scope": null,
+          "is_active": true
+        },
+        "spend": null,
+        "disabled_reason": "overage_not_provisioned",
+        "notice": null
+      }
+    }
+  }
+}

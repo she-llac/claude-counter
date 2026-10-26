@@ -1,0 +1,9 @@
+{
+  "name": "claude-counter",
+  "private": true,
+  "description": "Test runner entry for the Claude Counter browser extension (the extension itself needs no build step).",
+  "license": "MIT",
+  "scripts": {
+    "test": "node --test \"tests/**/*.test.js\""
+  }
+}

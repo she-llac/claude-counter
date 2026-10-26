@@ -55,8 +55,10 @@
 		if (!leaf) return [];
 
 		const trunk = [];
+		const visited = new Set();
 		let currentId = leaf;
-		while (currentId && currentId !== ROOT_MESSAGE_ID) {
+		while (currentId && currentId !== ROOT_MESSAGE_ID && !visited.has(currentId)) {
+			visited.add(currentId);
 			const msg = byId.get(currentId);
 			if (!msg) break;
 			trunk.push(msg);
@@ -133,12 +135,23 @@
 	}
 
 	async function hashString(str) {
-		if (!CC.bridge?.requestHash) return null;
-		try {
-			const res = await CC.bridge.requestHash(str);
-			if (res?.hash) return res.hash;
-		} catch {
-			// No local hashing fallback.
+		if (typeof crypto !== 'undefined' && crypto.subtle?.digest) {
+			try {
+				const buffer = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+				const bytes = new Uint8Array(buffer);
+				return Array.from(bytes.slice(0, 8), (b) => b.toString(16).padStart(2, '0')).join('');
+			} catch {
+				// fallback to bridge
+			}
+		}
+
+		if (CC.bridge?.requestHash) {
+			try {
+				const res = await CC.bridge.requestHash(str);
+				if (res?.hash) return res.hash;
+			} catch {
+				// ignore
+			}
 		}
 		return null;
 	}

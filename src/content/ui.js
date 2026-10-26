@@ -3,6 +3,13 @@
 
 	const CC = (globalThis.ClaudeCounter = globalThis.ClaudeCounter || {});
 
+	const USAGE_TOOLTIP_TAIL =
+		'\n0% without a countdown: the window ended and nothing was used since.\n"no data yet": the limits arrive with your next reply.';
+	const SESSION_TOOLTIP =
+		'5-hour session window.\nThe bar shows your usage.\nThe line marks where you are in the window.' + USAGE_TOOLTIP_TAIL;
+	const WEEKLY_TOOLTIP =
+		'7-day usage window.\nThe bar shows your usage.\nThe line marks where you are in the window.' + USAGE_TOOLTIP_TAIL;
+
 	function formatSeconds(totalSeconds) {
 		const minutes = Math.floor(totalSeconds / 60);
 		const seconds = totalSeconds % 60;
@@ -92,9 +99,32 @@
 		const tip = document.createElement('div');
 		tip.className = 'bg-bg-500 text-text-000 cc-tooltip';
 		tip.textContent = text;
-		document.body.appendChild(tip);
+		const appendTip = () => {
+			const target = document.body || document.documentElement;
+			if (target && !target.contains(tip)) {
+				target.appendChild(tip);
+			}
+		};
+		if (document.body || document.documentElement) {
+			appendTip();
+		} else {
+			window.addEventListener('DOMContentLoaded', appendTip, { once: true });
+		}
 		return tip;
 	}
+
+	// A title that says nothing about the chat cannot be used to find the title element in the page.
+	const GENERIC_TITLES = new Set(['claude', 'new chat', 'untitled', 'chats', 'projects', 'nov\u00fd chat']);
+	const TITLE_STOP_TAGS = new Set(['HEADER', 'MAIN', 'BODY', 'HTML', 'NAV', 'ASIDE', 'SECTION', 'FORM']);
+	const TITLE_SCAN_MIN_MS = 1500;
+	const TITLE_SCAN_MAX_TRIES = 25;
+	// Header under the title: the left padding of the header (the text starts that far in) and how far
+	// up into the title's own box it starts.
+	const HEADER_PAD_PX = 4;
+	const UNDER_OVERLAP_PX = 2;
+
+	const normText = (t) => String(t || '').replace(/\s+/g, ' ').trim();
+	const hasElementChild = (el) => Array.from(el.children || []).some((c) => c && c.nodeType === 1);
 
 	class CounterUI {
 		constructor({ onUsageRefresh } = {}) {
@@ -109,6 +139,19 @@
 			this.lengthTooltip = null;
 			this.lastCachedUntilMs = null;
 			this.pendingCache = false;
+			this.headerInFallback = false;
+			// 'anchor' (next to the page's title element), 'title' (a second line under the title, found
+			// by the title text), 'bars' (above the usage bars), 'none' (not placed yet)
+			this.headerPlacement = 'none';
+			this._hiddenTicks = 0;
+			this.conversationTitle = '';
+			this._titleTries = 0;
+			this._titleScanAt = 0;
+			this._titleRejected = '';
+			this._titleAnchor = null;
+			this._titleLeaf = null;
+			this._badRowTicks = 0;
+			this._ticks = 0;
 
 			this.usageLine = null;
 			this.sessionUsageSpan = null;
@@ -124,6 +167,10 @@
 			this.sessionWindowStartMs = null;
 			this.weeklyWindowStartMs = null;
 			this.refreshingUsage = false;
+
+			this.sessionTooltip = null;
+			this.sessionHistory = [];
+			this.sessionResetKey = null;
 
 			this.domObserver = null;
 		}
@@ -199,30 +246,47 @@
 
 				if (usageMissing && !usageReattachPending) {
 					usageReattachPending = true;
-					CC.waitForElement(CC.DOM.MODEL_SELECTOR_DROPDOWN, 60000).then((el) => {
+					CC.waitForElement(CC.DOM.CHAT_INPUT, 60000).then((el) => {
 						usageReattachPending = false;
 						if (el) this.attachUsageLine();
 					});
 				}
 
+				if (headerMissing && !document.querySelector(CC.DOM.CHAT_HEADER_ANCHOR)) {
+					this._mountHeaderFallback();
+				}
+
 				if (headerMissing && !headerReattachPending) {
 					headerReattachPending = true;
-					CC.waitForElement(CC.DOM.CHAT_MENU_TRIGGER, 60000).then((el) => {
+					CC.waitForElement(CC.DOM.CHAT_HEADER_ANCHOR, 60000).then((el) => {
 						headerReattachPending = false;
 						if (el) this.attachHeader();
 					});
 				}
 			});
-			this.domObserver.observe(document.body, { childList: true, subtree: true });
+
+			const startObserving = () => {
+				const target = document.body || document.documentElement;
+				if (target) {
+					this.domObserver.observe(target, { childList: true, subtree: true });
+				}
+			};
+
+			if (document.body || document.documentElement) {
+				startObserving();
+			} else {
+				window.addEventListener('DOMContentLoaded', startObserving, { once: true });
+			}
 		}
 
 		_initUsageLine() {
 			this.usageLine = document.createElement('div');
 			this.usageLine.className =
-				'text-text-400 text-[11px] cc-usageRow cc-hidden flex flex-row items-center gap-3 w-full';
+				'text-text-400 text-[11px] cc-usageRow flex flex-row items-center gap-3 w-full';
 
 			this.sessionUsageSpan = document.createElement('span');
 			this.sessionUsageSpan.className = 'cc-usageText';
+			this.sessionUsageSpan.textContent = 'Session: no data yet';
 
 			this.sessionBar = document.createElement('div');
 			this.sessionBar.className = 'cc-bar cc-bar--usage';
@@ -236,6 +300,7 @@
 
 			this.weeklyUsageSpan = document.createElement('span');
 			this.weeklyUsageSpan.className = 'cc-usageText';
+			this.weeklyUsageSpan.textContent = 'Weekly: no data yet';
 
 			this.weeklyBar = document.createElement('div');
 			this.weeklyBar.className = 'cc-bar cc-bar--usage';
@@ -291,15 +356,18 @@
 				{ topOffset: 8 }
 			);
 
+			this.sessionTooltip = makeTooltip(
+				SESSION_TOOLTIP
+			);
 			setupTooltip(
 				this.sessionGroup,
-				makeTooltip("5-hour session window.\nThe bar shows your usage.\nThe line marks where you are in the window."),
+				this.sessionTooltip,
 				{ topOffset: 8 }
 			);
 
 			setupTooltip(
 				this.weeklyGroup,
-				makeTooltip("7-day usage window.\nThe bar shows your usage.\nThe line marks where you are in the window."),
+				makeTooltip(WEEKLY_TOOLTIP),
 				{ topOffset: 8 }
 			);
 		}
@@ -310,49 +378,366 @@
 			this.refreshProgressChrome();
 		}
 
+		/**
+		 * The header anchor is specific to a claude.ai layout. Where it cannot be found, or the header
+		 * ends up invisible, the token count and cache timer are shown just above the usage bars,
+		 * which are mounted next to the chat input and work in every layout seen so far.
+		 */
+		_mountHeaderFallback() {
+			if (this._mountHeaderByTitle()) return true;
+			return this._mountHeaderAboveBars();
+		}
+
+		_resetHeaderStyle() {
+			const st = this.headerContainer.style;
+			st.paddingLeft = '';
+			st.display = '';
+			st.alignItems = '';
+			st.marginLeft = '';
+			st.marginTop = '';
+			st.whiteSpace = '';
+			st.position = '';
+			st.left = '';
+			st.top = '';
+			st.zIndex = '';
+			st.pointerEvents = '';
+		}
+
+		_mountHeaderAboveBars() {
+			const line = this.usageLine;
+			if (!line || !line.parentElement || !this.headerContainer) return false;
+			if (line.previousElementSibling !== this.headerContainer) line.before(this.headerContainer);
+			this._resetHeaderStyle();
+			this.headerContainer.style.paddingLeft = '12px';
+			this.headerInFallback = true;
+			this.headerPlacement = 'bars';
+			this._badRowTicks = 0;
+			this._renderHeader();
+			return true;
+		}
+
+		/** The chat title, as the conversation read gives it. */
+		setConversationTitle(name) {
+			const next = normText(name);
+			if (next === this.conversationTitle) return;
+			this.conversationTitle = next;
+			this._titleTries = 0;
+			this._titleRejected = '';
+			this._titleScanAt = 0;
+			if (this.headerPlacement === 'bars') this._mountHeaderByTitle();
+		}
+
+		_titleCandidates() {
+			const out = [];
+			const add = (t) => {
+				const text = normText(t);
+				if (text.length >= 2 && !GENERIC_TITLES.has(text.toLowerCase()) && !out.includes(text)) out.push(text);
+			};
+			add(this.conversationTitle);
+			try {
+				add(String(document.title || '').replace(/\s*[-\u2013\u2014|\u00b7]\s*Claude\s*$/i, ''));
+			} catch {
+				// ignore
+			}
+			return out;
+		}
+
+		/**
+		 * Where the page shows the chat title, found by the title's own text: the layout of the new
+		 * interface is not known, the text is. Returns the elements the header may follow, the widest
+		 * wrapper that holds nothing but the title first, the title text element itself last.
+		 */
+		_findTitleAnchors(titles) {
+			const all = document.querySelectorAll('*');
+			let leaf = null;
+			for (const el of all) {
+				if (hasElementChild(el)) continue;
+				const text = normText(el.textContent);
+				if (!text || !titles.includes(text)) continue;
+				if (el.closest('nav, aside, [role="navigation"], .cc-header, .cc-usageRow, .cc-tooltip, script, style')) continue;
+				const r = el.getBoundingClientRect();
+				if (!(r.width > 0 && r.height > 0 && r.top < 140 && r.bottom > 0)) continue;
+				leaf = el;
+				break;
+			}
+			if (!leaf) return [];
+			const text = normText(leaf.textContent);
+			const chain = [leaf];
+			let anchor = leaf;
+			while (anchor.parentElement && !TITLE_STOP_TAGS.has(anchor.parentElement.tagName) && normText(anchor.parentElement.textContent) === text) {
+				anchor = anchor.parentElement;
+				chain.push(anchor);
+			}
+			return chain.reverse();
+		}
+
+		/** Out of the row (no room taken from the title or the buttons), placed by _positionHeaderUnderTitle. */
+		_styleHeaderUnderTitle() {
+			this._resetHeaderStyle();
+			const st = this.headerContainer.style;
+			st.position = 'absolute';
+			st.display = 'inline-flex';
+			st.alignItems = 'center';
+			st.marginLeft = '0';
+			st.marginTop = '0';
+			st.whiteSpace = 'nowrap';
+			st.zIndex = '1';
+			st.pointerEvents = 'auto';
+		}
+
+		/** Puts the header under the start of the title, measured against the element it is positioned in. */
+		_positionHeaderUnderTitle(leaf) {
+			const parent = this.headerContainer.offsetParent;
+			if (!parent || !leaf || parent === document.body || parent === document.documentElement) return false;
+			const pr = parent.getBoundingClientRect();
+			const lr = leaf.getBoundingClientRect();
+			const st = this.headerContainer.style;
+			st.left = `${Math.round(lr.left - pr.left - HEADER_PAD_PX)}px`;
+			st.top = `${Math.round(lr.bottom - pr.top - UNDER_OVERLAP_PX)}px`;
+			return true;
+		}
+
+		/** The header sits right under the start of the title, inside the window. */
+		_headerUnderTitle(leaf) {
+			const hr = this.headerContainer.getBoundingClientRect();
+			const lr = leaf.getBoundingClientRect();
+			if (!(hr.width > 0 && hr.height > 0)) return false;
+			if (Math.abs(hr.left - (lr.left - HEADER_PAD_PX)) > 3) return false;
+			if (hr.top < lr.top + lr.height / 2 - 1) return false;
+			if (hr.top - lr.bottom > 12) return false;
+			const viewWidth = typeof window !== 'undefined' && window.innerWidth ? window.innerWidth : Infinity;
+			return hr.right <= viewWidth + 1;
+		}
+
+		_mountHeaderByTitle() {
+			if (!this.headerContainer || !document.body) return false;
+			const titles = this._titleCandidates();
+			if (titles.length === 0) return false;
+			// An empty header has no size: whether it sits under the title cannot be checked. It is
+			// placed when the token count arrives (setConversationMetrics) or by the periodic retry.
+			if (!this.headerContainer.firstChild) return false;
+			const key = titles.join('|');
+			if (this._titleRejected === key) return false;
+
+			const now = Date.now();
+			if (now - this._titleScanAt < TITLE_SCAN_MIN_MS) return false;
+			if (this._titleTries >= TITLE_SCAN_MAX_TRIES) return false;
+			this._titleScanAt = now;
+			this._titleTries += 1;
+
+			const anchors = this._findTitleAnchors(titles);
+			if (anchors.length === 0) return false;
+
+			// Not outside the bar that holds the title: the first anchor, from the outside in, where the
+			// header really lands under the title.
+			const leaf = anchors[anchors.length - 1];
+			for (const anchor of anchors) {
+				if (anchor.nextElementSibling !== this.headerContainer) anchor.after(this.headerContainer);
+				this._styleHeaderUnderTitle();
+				this._renderHeader();
+				if (this._positionHeaderUnderTitle(leaf) && this._headerUnderTitle(leaf)) {
+					this._acceptTitlePlacement(anchor, leaf);
+					return true;
+				}
+			}
+
+			this._titleRejected = key;
+			this._resetHeaderStyle();
+			// back to where it was: above the bars, or out of the page until the bars exist
+			if (!this._mountHeaderAboveBars()) this.headerContainer.remove();
+			return false;
+		}
+
+		_acceptTitlePlacement(anchor, leaf) {
+			this.headerInFallback = true;
+			this.headerPlacement = 'title';
+			this._badRowTicks = 0;
+			this._titleAnchor = anchor;
+			this._titleLeaf = leaf;
+		}
+
+		/** A header placed by the title text must stay under the title; if it does not, it goes back above the bars. */
+		_checkTitlePlacement() {
+			if (this.headerPlacement !== 'title' || !this.headerContainer.firstChild) {
+				this._badRowTicks = 0;
+				return;
+			}
+			const anchor = this._titleAnchor;
+			const leaf = this._titleLeaf;
+			const alive = !!anchor && !!leaf && document.contains(anchor) && document.contains(leaf) && document.contains(this.headerContainer);
+			if (alive) this._positionHeaderUnderTitle(leaf);
+			if (alive && this._headerUnderTitle(leaf)) {
+				this._badRowTicks = 0;
+				return;
+			}
+			this._badRowTicks += 1;
+			if (this._badRowTicks >= 3) {
+				this._titleRejected = this._titleCandidates().join('|');
+				this._mountHeaderAboveBars();
+			}
+		}
+
+		/** Every few seconds: while the header sits above the bars, look again for the title. */
+		_retryTitleMount() {
+			if (this.headerPlacement !== 'bars' || !this.headerContainer.firstChild) return;
+			this._mountHeaderByTitle();
+		}
+
+		_ensureHeaderVisible() {
+			if (!this.headerContainer || !this.headerContainer.firstChild) {
+				this._hiddenTicks = 0;
+				return;
+			}
+			const shown = document.contains(this.headerContainer) && this.headerContainer.getClientRects().length > 0;
+			if (shown) {
+				this._hiddenTicks = 0;
+				return;
+			}
+			this._hiddenTicks += 1;
+			if (this._hiddenTicks >= 3) {
+				this._hiddenTicks = 0;
+				if (this.headerPlacement === 'title') {
+					this._titleRejected = this._titleCandidates().join('|');
+					this._mountHeaderAboveBars();
+				} else if (!this.headerInFallback) {
+					this._mountHeaderFallback();
+				}
+			}
+		}
+
 		attachHeader() {
-			const chatMenu = document.querySelector(CC.DOM.CHAT_MENU_TRIGGER);
-			if (!chatMenu) return;
-			const anchor = chatMenu.closest(CC.DOM.CHAT_PROJECT_WRAPPER) || chatMenu.parentElement;
+			const trigger = document.querySelector(CC.DOM.CHAT_HEADER_ANCHOR);
+			if (!trigger) {
+				this._mountHeaderFallback();
+				return;
+			}
+			// New header anchors on chat-title-split / chat-title-button / conversation-title; legacy on chat-menu-trigger
+			const testId = trigger.getAttribute('data-testid');
+			const anchor =
+				testId === 'chat-title-split' || testId === 'chat-title-button' || testId === 'conversation-title'
+					? trigger
+					: trigger.closest(CC.DOM.CHAT_PROJECT_WRAPPER) || trigger.parentElement;
 			if (!anchor) return;
 			if (anchor.nextElementSibling !== this.headerContainer) {
 				anchor.after(this.headerContainer);
 			}
+			this.headerInFallback = false;
+			this.headerPlacement = 'anchor';
+			this._resetHeaderStyle();
 			this._renderHeader();
 			this.refreshProgressChrome();
 		}
 
 		attachUsageLine() {
-			if (!this.usageLine) return;
-			const modelSelector = document.querySelector(CC.DOM.MODEL_SELECTOR_DROPDOWN);
-			if (!modelSelector) return;
-			const gridContainer = modelSelector.closest('[data-testid="chat-input-grid-container"]');
-			const gridArea = modelSelector.closest('[data-testid="chat-input-grid-area"]');
-			const findToolbarRow = (el, stopAt) => {
-				let cur = el;
-				while (cur && cur !== document.body) {
-					if (stopAt && cur === stopAt) break;
-					if (cur !== el && cur.nodeType === 1) {
-						const style = window.getComputedStyle(cur);
-						if (style.display === 'flex' && style.flexDirection === 'row') {
-							const buttons = cur.querySelectorAll('button').length;
-							if (buttons > 1) return cur;
-						}
-					}
-					cur = cur.parentElement;
-				}
-				return null;
-			};
+			this._attachUsageLine();
+			// A header waiting for the usage line (fallback mount) can be placed now.
+			if (this.headerContainer && !document.contains(this.headerContainer)) this.attachHeader();
+		}
 
-			const toolbarRow =
-				(gridContainer ? findToolbarRow(modelSelector, gridArea || gridContainer) : null) ||
-				findToolbarRow(modelSelector) ||
-				modelSelector.parentElement?.parentElement?.parentElement;
-			if (!toolbarRow) return;
-			if (toolbarRow.nextElementSibling !== this.usageLine) {
-				toolbarRow.after(this.usageLine);
+		/** The usage bars are in place when they come right after the composer, or after the fallback header that sits there. */
+		_followsComposer(flowChild) {
+			const next = flowChild.nextElementSibling;
+			if (next === this.usageLine) return true;
+			return !!this.headerContainer && next === this.headerContainer && this.headerContainer.nextElementSibling === this.usageLine;
+		}
+
+		_attachUsageLine() {
+			if (!this.usageLine) return;
+
+			// Primary approach (redesigned composer): Resolve from the chat input element
+			// The chat input exists on both home view and active conversation views.
+			const chatInput = document.querySelector(CC.DOM.CHAT_INPUT || '[data-testid="chat-input"], div[contenteditable="true"], textarea');
+			if (chatInput) {
+				// The input lives inside a flow child inside .bg-surface-3:
+				// .bg-surface-3 > .relative.w-full.min-w-0
+				const composerFlowChild = chatInput.closest('.bg-surface-3 > .relative.w-full.min-w-0') ||
+				                          chatInput.closest('.relative.w-full.min-w-0');
+
+				if (composerFlowChild && composerFlowChild.parentElement) {
+					if (!this._followsComposer(composerFlowChild)) {
+						composerFlowChild.after(this.usageLine);
+					}
+					this.usageLine.style.paddingLeft = '12px';
+					this.usageLine.style.paddingRight = '12px';
+					this.usageLine.style.paddingBottom = '4px';
+					this.refreshProgressChrome();
+					return;
+				}
+
+				// If flow child structure differs, mount inside the composer box container
+				const composerBox = chatInput.closest('.bg-surface-3') ||
+				                    chatInput.closest('[data-cds="ChatComposer"]') ||
+				                    chatInput.closest('fieldset') ||
+				                    chatInput.closest('form');
+
+				if (composerBox) {
+					const targetBox = composerBox.querySelector(':scope > .bg-surface-3') || composerBox;
+					if (targetBox && targetBox.lastElementChild !== this.usageLine) {
+						targetBox.appendChild(this.usageLine);
+					}
+					this.usageLine.style.paddingLeft = '12px';
+					this.usageLine.style.paddingRight = '12px';
+					this.usageLine.style.paddingBottom = '4px';
+					this.refreshProgressChrome();
+					return;
+				}
 			}
-			this.refreshProgressChrome();
+
+			// Fallback approach: model selector dropdown
+			const modelSelector = document.querySelector(CC.DOM.MODEL_SELECTOR_DROPDOWN);
+			if (modelSelector) {
+				const composer =
+					modelSelector.closest(CC.DOM.COMPOSER) ||
+					document.querySelector(CC.DOM.COMPOSER);
+				if (composer) {
+					const box = composer.querySelector(':scope > .bg-surface-3') || composer.firstElementChild;
+					if (box && box.lastElementChild !== this.usageLine) {
+						box.appendChild(this.usageLine);
+					}
+					this.usageLine.style.paddingLeft = '12px';
+					this.usageLine.style.paddingRight = '12px';
+					this.usageLine.style.paddingBottom = '4px';
+					this.refreshProgressChrome();
+					return;
+				}
+
+				const gridContainer = modelSelector.closest('[data-testid="chat-input-grid-container"]');
+				const gridArea = modelSelector.closest('[data-testid="chat-input-grid-area"]');
+				const findToolbarRow = (el, stopAt) => {
+					let cur = el;
+					while (cur && cur !== document.body) {
+						if (stopAt && cur === stopAt) break;
+						if (cur !== el && cur.nodeType === 1) {
+							const style = window.getComputedStyle(cur);
+							if (style.display === 'flex' && style.flexDirection === 'row') {
+								const buttons = cur.querySelectorAll('button').length;
+								if (buttons > 1) return cur;
+							}
+						}
+						cur = cur.parentElement;
+					}
+					return null;
+				};
+
+				const toolbarRow =
+					(gridContainer ? findToolbarRow(modelSelector, gridArea || gridContainer) : null) ||
+					findToolbarRow(modelSelector) ||
+					modelSelector.parentElement?.parentElement?.parentElement;
+				if (toolbarRow && toolbarRow.nextElementSibling !== this.usageLine) {
+					toolbarRow.after(this.usageLine);
+					this.refreshProgressChrome();
+					return;
+				}
+			}
+
+			// Last resort fallback: input's immediate parent
+			if (chatInput && chatInput.parentElement) {
+				const parent = chatInput.closest('.flex-col') || chatInput.parentElement;
+				if (parent && parent.lastElementChild !== this.usageLine) {
+					parent.appendChild(this.usageLine);
+					this.refreshProgressChrome();
+				}
+			}
 		}
 
 		setPendingCache(pending) {
@@ -367,8 +752,15 @@
 			}
 		}
 
-		setConversationMetrics({ totalTokens, cachedUntil } = {}) {
+		setConversationMetrics(metrics) {
+			const { totalTokens, cachedUntil } = metrics || {};
 			this.pendingCache = false;
+			if (!metrics) {
+				// leaving the chat
+				this.conversationTitle = '';
+				this._titleTries = 0;
+				this._titleRejected = '';
+			}
 
 			if (typeof totalTokens !== 'number') {
 				this.lengthDisplay.textContent = '';
@@ -428,6 +820,8 @@
 			}
 
 			this._renderHeader();
+			// A header that waited above the bars for its content can now be placed under the title.
+			if (this.headerPlacement === 'bars') this._mountHeaderByTitle();
 		}
 
 		_renderHeader() {
@@ -452,60 +846,138 @@
 			this.headerContainer.appendChild(this.headerDisplay);
 		}
 
+		_updateSessionTooltip() {
+			if (!this.sessionTooltip) return;
+			const baseText = SESSION_TOOLTIP;
+			if (this.sessionHistory && this.sessionHistory.length > 0) {
+				const historyLine = this.sessionHistory
+					.map((v) => (v === 0 ? '0' : `${v}%`))
+					.join(' -> ');
+				this.sessionTooltip.textContent = `${historyLine}\n${baseText}`;
+			} else {
+				this.sessionTooltip.textContent = baseText;
+			}
+		}
+
+		_updateSessionHistory(resetsAt, currentPct) {
+			if (!resetsAt) {
+				this.sessionHistory = [];
+				this.sessionResetKey = null;
+				this._updateSessionTooltip();
+				return;
+			}
+
+			const processHistory = (storedResetsAt, storedHistory) => {
+				let history = [];
+				if (storedResetsAt === resetsAt && Array.isArray(storedHistory) && storedHistory.length > 0) {
+					history = [...storedHistory];
+				} else {
+					history = currentPct > 0 ? [0, currentPct] : [0];
+				}
+
+				const lastVal = history[history.length - 1];
+				if (currentPct > lastVal) {
+					history.push(currentPct);
+					if (history.length > 5) {
+						history = history.slice(-5);
+					}
+				} else if (currentPct < lastVal) {
+					history = currentPct > 0 ? [0, currentPct] : [0];
+				}
+
+				this.sessionHistory = history;
+				this.sessionResetKey = resetsAt;
+				this._updateSessionTooltip();
+
+				try {
+					if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+						chrome.storage.local.set({
+							claude_session_history: { resets_at: resetsAt, history }
+						});
+					}
+				} catch (e) {
+					// ignore storage errors
+				}
+			};
+
+			if (this.sessionResetKey !== resetsAt) {
+				this.sessionResetKey = resetsAt;
+				try {
+					if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+						chrome.storage.local.get(['claude_session_history'], (result) => {
+							const data = result?.claude_session_history;
+							processHistory(data?.resets_at, data?.history);
+						});
+					} else {
+						processHistory(null, null);
+					}
+				} catch (e) {
+					processHistory(null, null);
+				}
+			} else {
+				processHistory(resetsAt, this.sessionHistory);
+			}
+		}
+
+		/**
+		 * One usage window, three states:
+		 *  - live    { utilization, resets_at }: value and countdown
+		 *  - expired { expired: true }: the reset time passed, nothing used since: 0%, no countdown
+		 *  - unknown (null): no data yet, e.g. the free plan reports usage only with the first reply
+		 */
+		_renderWindow({ label, windowMs, w, span, fill }) {
+			const live = w && !w.expired && typeof w.utilization === 'number';
+
+			if (live) {
+				const rawPct = w.utilization;
+				const pct = Math.round(rawPct * 10) / 10;
+				const resetMs = w.resets_at ? Date.parse(w.resets_at) : null;
+				const resetText = resetMs ? ` · resets in ${formatResetCountdown(resetMs)}` : '';
+				span.textContent = `${label}: ${pct}%${resetText}`;
+
+				const width = Math.max(0, Math.min(100, rawPct));
+				fill.style.width = `${width}%`;
+				fill.classList.toggle('cc-warn', width >= 90);
+				fill.classList.toggle('cc-full', width >= 99.5);
+				return { resetMs, startMs: resetMs ? resetMs - windowMs : null, pct, live: true };
+			}
+
+			span.textContent = w && w.expired ? `${label}: 0%` : `${label}: no data yet`;
+			fill.style.width = '0%';
+			fill.classList.remove('cc-warn', 'cc-full');
+			return { resetMs: null, startMs: null, pct: 0, live: false };
+		}
+
 		setUsage(usage) {
 			this.refreshProgressChrome();
-			const session = usage?.five_hour || null;
-			const weekly = usage?.seven_day || null;
-			const hasAnyUsage =
-				!!(session && typeof session.utilization === 'number') || !!(weekly && typeof weekly.utilization === 'number');
-			this.usageLine?.classList.toggle('cc-hidden', !hasAnyUsage);
 
-			if (session && typeof session.utilization === 'number') {
-				const rawPct = session.utilization;
-				const pct = Math.round(rawPct * 10) / 10;
-				this.sessionResetMs = session.resets_at ? Date.parse(session.resets_at) : null;
-				this.sessionWindowStartMs = this.sessionResetMs ? this.sessionResetMs - 5 * 60 * 60 * 1000 : null;
-				const resetText = this.sessionResetMs ? ` · resets in ${formatResetCountdown(this.sessionResetMs)}` : '';
-				this.sessionUsageSpan.textContent = `Session: ${pct}%${resetText}`;
+			// Bars are permanent
+			this.usageLine?.classList.remove('cc-hidden');
+			this.weeklyGroup?.classList.remove('cc-hidden');
+			this.sessionGroup?.classList.remove('cc-usageGroup--single');
+			this.weeklyUsageSpan.classList.remove('cc-hidden');
+			this.weeklyBar.classList.remove('cc-hidden');
 
-				const width = Math.max(0, Math.min(100, rawPct));
-				this.sessionBarFill.style.width = `${width}%`;
-				this.sessionBarFill.classList.toggle('cc-warn', width >= 90);
-				this.sessionBarFill.classList.toggle('cc-full', width >= 99.5);
-			} else {
-				this.sessionUsageSpan.textContent = '';
-				this.sessionBarFill.style.width = '0%';
-				this.sessionBarFill.classList.remove('cc-warn', 'cc-full');
-				this.sessionResetMs = null;
-				this.sessionWindowStartMs = null;
-			}
+			const session = this._renderWindow({
+				label: 'Session',
+				windowMs: 5 * 60 * 60 * 1000,
+				w: usage?.five_hour || null,
+				span: this.sessionUsageSpan,
+				fill: this.sessionBarFill
+			});
+			this.sessionResetMs = session.resetMs;
+			this.sessionWindowStartMs = session.startMs;
+			this._updateSessionHistory(session.live && usage.five_hour.resets_at ? usage.five_hour.resets_at : null, session.pct);
 
-			const hasWeekly = weekly && typeof weekly.utilization === 'number';
-			this.weeklyGroup?.classList.toggle('cc-hidden', !hasWeekly);
-			this.sessionGroup?.classList.toggle('cc-usageGroup--single', !hasWeekly);
-
-			if (hasWeekly) {
-				this.weeklyUsageSpan.classList.remove('cc-hidden');
-				this.weeklyBar.classList.remove('cc-hidden');
-
-				const rawPct = weekly.utilization;
-				const pct = Math.round(rawPct * 10) / 10;
-				this.weeklyResetMs = weekly.resets_at ? Date.parse(weekly.resets_at) : null;
-				this.weeklyWindowStartMs = this.weeklyResetMs ? this.weeklyResetMs - 7 * 24 * 60 * 60 * 1000 : null;
-				const resetText = this.weeklyResetMs ? ` · resets in ${formatResetCountdown(this.weeklyResetMs)}` : '';
-				this.weeklyUsageSpan.textContent = `Weekly: ${pct}%${resetText}`;
-
-				const width = Math.max(0, Math.min(100, rawPct));
-				this.weeklyBarFill.style.width = `${width}%`;
-				this.weeklyBarFill.classList.toggle('cc-warn', width >= 90);
-				this.weeklyBarFill.classList.toggle('cc-full', width >= 99.5);
-			} else {
-				this.weeklyUsageSpan.classList.add('cc-hidden');
-				this.weeklyBar.classList.add('cc-hidden');
-				this.weeklyResetMs = null;
-				this.weeklyWindowStartMs = null;
-				this.weeklyBarFill.classList.remove('cc-warn', 'cc-full');
-			}
+			const weekly = this._renderWindow({
+				label: 'Weekly',
+				windowMs: 7 * 24 * 60 * 60 * 1000,
+				w: usage?.seven_day || null,
+				span: this.weeklyUsageSpan,
+				fill: this.weeklyBarFill
+			});
+			this.weeklyResetMs = weekly.resetMs;
+			this.weeklyWindowStartMs = weekly.startMs;
 
 			this._updateMarkers();
 		}
@@ -537,6 +1009,11 @@
 		}
 
 		tick() {
+			this._ensureHeaderVisible();
+			this._checkTitlePlacement();
+			this._ticks += 1;
+			if (this._ticks % 3 === 0) this._retryTitleMount();
+
 			// Cache countdown
 			const now = Date.now();
 			if (this.lastCachedUntilMs && this.lastCachedUntilMs > now) {
