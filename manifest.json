@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
-  "name": "Claude Counter",
-  "version": "0.4.2",
+  "name": "AI Usage Counter",
+  "version": "0.6.0",
   "browser_specific_settings": {
     "gecko": {
       "id": "{236c6889-52b6-4454-bc4b-5a2ad18effa2}",
@@ -9,7 +9,7 @@
       "data_collection_permissions": { "required": ["none"] }
     }
   },
-  "description": "Shows ~token count, cache timer, and native session/weekly usage bars on claude.ai.",
+  "description": "Shows ~token count, cache timer, and usage bars on claude.ai, plus estimated 5-hour and weekly usage bars on gemini.google.com.",
   "icons": {
     "16": "icons/icon16.png",
     "32": "icons/icon32.png",
@@ -19,7 +19,7 @@
     "256": "icons/icon256.png"
   },
   "action": {
-    "default_title": "Claude Counter",
+    "default_title": "AI Usage Counter",
     "default_icon": {
       "16": "icons/icon16.png",
       "32": "icons/icon32.png",
@@ -28,6 +28,7 @@
       "128": "icons/icon128.png"
     }
   },
+  "permissions": ["storage"],
   "content_scripts": [
     {
       "matches": ["https://claude.ai/*"],
@@ -40,12 +41,28 @@
         "src/content/ui.js",
         "src/content/main.js"
       ]
+    },
+    {
+      "matches": ["https://gemini.google.com/*"],
+      "css": ["src/styles.css"],
+      "run_at": "document_start",
+      "js": [
+        "src/gemini/constants.js",
+        "src/gemini/bridge-client.js",
+        "src/gemini/estimator.js",
+        "src/gemini/ui.js",
+        "src/gemini/main.js"
+      ]
     }
   ],
   "web_accessible_resources": [
     {
       "resources": ["src/injected/bridge.js"],
       "matches": ["https://claude.ai/*"]
+    },
+    {
+      "resources": ["src/gemini/injected/bridge.js"],
+      "matches": ["https://gemini.google.com/*"]
     }
   ]
 }

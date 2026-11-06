@@ -111,18 +111,21 @@
 			this.pendingCache = false;
 
 			this.usageLine = null;
-			this.sessionUsageSpan = null;
+			this.modelGroups = {};
+			this.weeklyGroup = null;
 			this.weeklyUsageSpan = null;
-			this.sessionBar = null;
-			this.sessionBarFill = null;
 			this.weeklyBar = null;
 			this.weeklyBarFill = null;
-			this.sessionResetMs = null;
-			this.weeklyResetMs = null;
-			this.sessionMarker = null;
 			this.weeklyMarker = null;
-			this.sessionWindowStartMs = null;
+			this.weeklyResetMs = null;
 			this.weeklyWindowStartMs = null;
+			this.overuseGroup = null;
+			this.overuseUsageSpan = null;
+			this.overuseBar = null;
+			this.overuseBarFill = null;
+			this.fiveHourIndicator = null;
+			this.isNewChat = false;
+			this.activeModel = 'sonnet';
 			this.refreshingUsage = false;
 
 			this.domObserver = null;
@@ -154,8 +157,13 @@
 			};
 
 			applyBarChrome(this.lengthBar, { fillWarn: fillColor });
-			applyBarChrome(this.sessionBar, { fillWarn: CC.COLORS.RED_WARNING });
+			for (const m of (CC.MODELS || ['haiku', 'sonnet', 'opus'])) {
+				if (this.modelGroups?.[m]?.bar) {
+					applyBarChrome(this.modelGroups[m].bar, { fillWarn: CC.COLORS.RED_WARNING });
+				}
+			}
 			applyBarChrome(this.weeklyBar, { fillWarn: CC.COLORS.RED_WARNING });
+			applyBarChrome(this.overuseBar, { fillWarn: CC.COLORS.RED_WARNING });
 		}
 
 		initialize() {
@@ -219,20 +227,43 @@
 		_initUsageLine() {
 			this.usageLine = document.createElement('div');
 			this.usageLine.className =
-				'text-text-400 text-[11px] cc-usageRow cc-hidden flex flex-row items-center gap-3 w-full';
+				'text-text-400 text-[11px] cc-usageRow cc-hidden flex flex-row items-center gap-4 w-full flex-nowrap';
 
-			this.sessionUsageSpan = document.createElement('span');
-			this.sessionUsageSpan.className = 'cc-usageText';
+			this.modelGroups = {};
+			for (const m of (CC.MODELS || ['haiku', 'sonnet', 'opus'])) {
+				const usageSpan = document.createElement('span');
+				usageSpan.className = 'cc-usageText';
 
-			this.sessionBar = document.createElement('div');
-			this.sessionBar.className = 'cc-bar cc-bar--usage';
-			this.sessionBarFill = document.createElement('div');
-			this.sessionBarFill.className = 'cc-bar__fill';
-			this.sessionMarker = document.createElement('div');
-			this.sessionMarker.className = 'cc-bar__marker cc-hidden';
-			this.sessionMarker.style.left = '0%';
-			this.sessionBar.appendChild(this.sessionBarFill);
-			this.sessionBar.appendChild(this.sessionMarker);
+				const bar = document.createElement('div');
+				bar.className = 'cc-bar cc-bar--usage';
+				const widthPct = CC.MODEL_WIDTHS?.[m] || '15%';
+				bar.style.width = widthPct;
+				bar.style.flex = `0 0 ${widthPct}`;
+
+				const barFill = document.createElement('div');
+				barFill.className = 'cc-bar__fill';
+				const marker = document.createElement('div');
+				marker.className = 'cc-bar__marker cc-hidden';
+				marker.style.left = '0%';
+				bar.appendChild(barFill);
+				bar.appendChild(marker);
+
+				const group = document.createElement('div');
+				group.className = 'cc-usageGroup cc-usageGroup--model';
+				group.appendChild(usageSpan);
+				group.appendChild(bar);
+
+				this.modelGroups[m] = {
+					group,
+					usageSpan,
+					bar,
+					barFill,
+					marker,
+					resetMs: null,
+					windowStartMs: null
+				};
+				this.usageLine.appendChild(group);
+			}
 
 			this.weeklyUsageSpan = document.createElement('span');
 			this.weeklyUsageSpan.className = 'cc-usageText';
@@ -247,18 +278,31 @@
 			this.weeklyBar.appendChild(this.weeklyBarFill);
 			this.weeklyBar.appendChild(this.weeklyMarker);
 
-			this.sessionGroup = document.createElement('div');
-			this.sessionGroup.className = 'cc-usageGroup';
-			this.sessionGroup.appendChild(this.sessionUsageSpan);
-			this.sessionGroup.appendChild(this.sessionBar);
-
 			this.weeklyGroup = document.createElement('div');
 			this.weeklyGroup.className = 'cc-usageGroup cc-usageGroup--weekly';
 			this.weeklyGroup.appendChild(this.weeklyBar);
 			this.weeklyGroup.appendChild(this.weeklyUsageSpan);
-
-			this.usageLine.appendChild(this.sessionGroup);
 			this.usageLine.appendChild(this.weeklyGroup);
+
+			this.overuseUsageSpan = document.createElement('span');
+			this.overuseUsageSpan.className = 'cc-usageText';
+
+			this.overuseBar = document.createElement('div');
+			this.overuseBar.className = 'cc-bar cc-bar--usage';
+			this.overuseBarFill = document.createElement('div');
+			this.overuseBarFill.className = 'cc-bar__fill';
+			this.overuseBar.appendChild(this.overuseBarFill);
+
+			this.overuseGroup = document.createElement('div');
+			this.overuseGroup.className = 'cc-usageGroup cc-usageGroup--overuse';
+			this.overuseGroup.appendChild(this.overuseBar);
+			this.overuseGroup.appendChild(this.overuseUsageSpan);
+			this.usageLine.appendChild(this.overuseGroup);
+
+			this.fiveHourIndicator = document.createElement('span');
+			this.fiveHourIndicator.className = 'cc-usageText text-text-500 opacity-75 ml-auto mr-3 whitespace-nowrap select-none flex-shrink-0';
+			this.fiveHourIndicator.textContent = '5-hour limit';
+			this.usageLine.appendChild(this.fiveHourIndicator);
 
 			this.refreshProgressChrome();
 
@@ -291,15 +335,27 @@
 				{ topOffset: 8 }
 			);
 
-			setupTooltip(
-				this.sessionGroup,
-				makeTooltip("5-hour session window.\nThe bar shows your usage.\nThe line marks where you are in the window."),
-				{ topOffset: 8 }
-			);
+			for (const m of (CC.MODELS || ['haiku', 'sonnet', 'opus'])) {
+				const mg = this.modelGroups?.[m];
+				if (mg?.group) {
+					const name = CC.MODEL_NAMES?.[m] || m;
+					setupTooltip(
+						mg.group,
+						makeTooltip(`${name} 5-hour session window.\nThe bar shows your usage.\nThe line marks where you are in the window.`),
+						{ topOffset: 8 }
+					);
+				}
+			}
 
 			setupTooltip(
 				this.weeklyGroup,
 				makeTooltip("7-day usage window.\nThe bar shows your usage.\nThe line marks where you are in the window."),
+				{ topOffset: 8 }
+			);
+
+			setupTooltip(
+				this.overuseGroup,
+				makeTooltip("Overuse (extra usage) credits.\nThe bar shows your extra usage consumption beyond subscription limits."),
 				{ topOffset: 8 }
 			);
 		}
@@ -398,6 +454,7 @@
 				this.lengthBar = bar;
 				const fill = document.createElement('div');
 				fill.className = 'cc-bar__fill';
+				if (pct >= 90) fill.classList.add('cc-warn');
 				fill.style.width = `${pct}%`;
 				bar.appendChild(fill);
 				this.refreshProgressChrome();
@@ -452,46 +509,95 @@
 			this.headerContainer.appendChild(this.headerDisplay);
 		}
 
-		setUsage(usage) {
+		setUsage(usage, { isNewChat = false, activeModel = 'sonnet' } = {}) {
+			this.isNewChat = !!isNewChat;
+			this.activeModel = activeModel;
+
 			this.refreshProgressChrome();
-			const session = usage?.five_hour || null;
+			const modelsFiveHour = usage?.models_five_hour || {};
+			const fallbackFiveHour = usage?.five_hour || null;
 			const weekly = usage?.seven_day || null;
-			const hasAnyUsage =
-				!!(session && typeof session.utilization === 'number') || !!(weekly && typeof weekly.utilization === 'number');
-			this.usageLine?.classList.toggle('cc-hidden', !hasAnyUsage);
+			const overuse = usage?.overuse || null;
 
-			if (session && typeof session.utilization === 'number') {
-				const rawPct = session.utilization;
-				const pct = Math.round(rawPct * 10) / 10;
-				this.sessionResetMs = session.resets_at ? Date.parse(session.resets_at) : null;
-				this.sessionWindowStartMs = this.sessionResetMs ? this.sessionResetMs - 5 * 60 * 60 * 1000 : null;
-				const resetText = this.sessionResetMs ? ` · resets in ${formatResetCountdown(this.sessionResetMs)}` : '';
-				this.sessionUsageSpan.textContent = `Session: ${pct}%${resetText}`;
-
-				const width = Math.max(0, Math.min(100, rawPct));
-				this.sessionBarFill.style.width = `${width}%`;
-				this.sessionBarFill.classList.toggle('cc-warn', width >= 90);
-				this.sessionBarFill.classList.toggle('cc-full', width >= 99.5);
+			let fiveHourResetMs = null;
+			if (fallbackFiveHour?.resets_at) {
+				fiveHourResetMs = Date.parse(fallbackFiveHour.resets_at);
 			} else {
-				this.sessionUsageSpan.textContent = '';
-				this.sessionBarFill.style.width = '0%';
-				this.sessionBarFill.classList.remove('cc-warn', 'cc-full');
-				this.sessionResetMs = null;
-				this.sessionWindowStartMs = null;
+				for (const m of (CC.MODELS || ['haiku', 'sonnet', 'opus'])) {
+					if (modelsFiveHour[m]?.resets_at) {
+						fiveHourResetMs = Date.parse(modelsFiveHour[m].resets_at);
+						break;
+					}
+				}
+			}
+			this.fiveHourResetMs = fiveHourResetMs;
+
+			if (this.fiveHourIndicator) {
+				this.fiveHourIndicator.style.display = isNewChat ? '' : 'none';
+				if (isNewChat) {
+					const resetText = fiveHourResetMs ? ` · resets in ${formatResetCountdown(fiveHourResetMs)}` : '';
+					this.fiveHourIndicator.textContent = `5h limit${resetText}`;
+				}
 			}
 
-			const hasWeekly = weekly && typeof weekly.utilization === 'number';
+			const hasAnyUsage = !!fallbackFiveHour || !!weekly || !!overuse || Object.keys(modelsFiveHour).length > 0;
+			this.usageLine?.classList.toggle('cc-hidden', !hasAnyUsage);
+
+			// 1. Model Session Bars (5-hour limit)
+			for (const m of (CC.MODELS || ['haiku', 'sonnet', 'opus'])) {
+				const mg = this.modelGroups?.[m];
+				if (!mg) continue;
+
+				const session = modelsFiveHour[m] || fallbackFiveHour;
+				const name = CC.MODEL_NAMES?.[m] || m;
+
+				if (isNewChat || m === activeModel) {
+					mg.group.classList.remove('cc-hidden');
+					const barWidth = isNewChat ? (CC.MODEL_WIDTHS?.[m] || '96px') : '200px';
+					mg.bar.style.width = barWidth;
+					mg.bar.style.flex = `0 0 ${barWidth}`;
+					if (session && typeof session.utilization === 'number') {
+						const rawPct = session.utilization;
+						const pct = Math.round(rawPct * 10) / 10;
+						mg.resetMs = session.resets_at ? Date.parse(session.resets_at) : null;
+						const windowHours = session.window_hours || 5;
+						mg.windowStartMs = mg.resetMs ? mg.resetMs - windowHours * 60 * 60 * 1000 : null;
+						const resetText = (!isNewChat && mg.resetMs) ? ` · resets in ${formatResetCountdown(mg.resetMs)}` : '';
+						mg.usageSpan.textContent = `${name}: ${pct}%${resetText}`;
+
+						const width = Math.max(0, Math.min(100, rawPct));
+						mg.barFill.style.width = `${width}%`;
+						mg.barFill.classList.toggle('cc-warn', width >= 90);
+						mg.barFill.classList.toggle('cc-full', width >= 99.5);
+					} else {
+						mg.usageSpan.textContent = `${name}: 0%`;
+						mg.barFill.style.width = '0%';
+						mg.barFill.classList.remove('cc-warn', 'cc-full');
+						mg.resetMs = null;
+						mg.windowStartMs = null;
+					}
+				} else {
+					mg.group.classList.add('cc-hidden');
+				}
+			}
+
+			// 2. Weekly Bar (7-day limit)
+			// Hidden on new chat site per requirement: "Show only 5 hour limit bars on the new chat site"
+			// Shown on existing conversation per requirement: "Once a model is choose and you remove all the other bars, make the weekly usage limit bar come back."
+			const hasWeekly = !isNewChat && weekly && typeof weekly.utilization === 'number';
 			this.weeklyGroup?.classList.toggle('cc-hidden', !hasWeekly);
-			this.sessionGroup?.classList.toggle('cc-usageGroup--single', !hasWeekly);
 
 			if (hasWeekly) {
 				this.weeklyUsageSpan.classList.remove('cc-hidden');
 				this.weeklyBar.classList.remove('cc-hidden');
+				this.weeklyBar.style.width = '200px';
+				this.weeklyBar.style.flex = '0 0 200px';
 
 				const rawPct = weekly.utilization;
 				const pct = Math.round(rawPct * 10) / 10;
 				this.weeklyResetMs = weekly.resets_at ? Date.parse(weekly.resets_at) : null;
-				this.weeklyWindowStartMs = this.weeklyResetMs ? this.weeklyResetMs - 7 * 24 * 60 * 60 * 1000 : null;
+				const weeklyHours = weekly.window_hours || (7 * 24);
+				this.weeklyWindowStartMs = this.weeklyResetMs ? this.weeklyResetMs - weeklyHours * 60 * 60 * 1000 : null;
 				const resetText = this.weeklyResetMs ? ` · resets in ${formatResetCountdown(this.weeklyResetMs)}` : '';
 				this.weeklyUsageSpan.textContent = `Weekly: ${pct}%${resetText}`;
 
@@ -499,12 +605,34 @@
 				this.weeklyBarFill.style.width = `${width}%`;
 				this.weeklyBarFill.classList.toggle('cc-warn', width >= 90);
 				this.weeklyBarFill.classList.toggle('cc-full', width >= 99.5);
-			} else {
+			} else if (this.weeklyGroup) {
 				this.weeklyUsageSpan.classList.add('cc-hidden');
 				this.weeklyBar.classList.add('cc-hidden');
 				this.weeklyResetMs = null;
 				this.weeklyWindowStartMs = null;
 				this.weeklyBarFill.classList.remove('cc-warn', 'cc-full');
+			}
+
+			// 3. Overuse Credits Bar - removed per requirement
+			const hasOveruse = false;
+			this.overuseGroup?.classList.toggle('cc-hidden', true);
+
+			if (hasOveruse) {
+				let label = 'Overuse';
+				const pct = typeof overuse.utilization === 'number' ? Math.round(overuse.utilization * 10) / 10 : null;
+				if (typeof overuse.used === 'number' && typeof overuse.limit === 'number') {
+					label = `Overuse: $${overuse.used}/$${overuse.limit}${pct !== null ? ` (${pct}%)` : ''}`;
+				} else if (pct !== null) {
+					label = `Overuse: ${pct}%`;
+				} else if (typeof overuse.used === 'number') {
+					label = `Overuse: $${overuse.used}`;
+				}
+				this.overuseUsageSpan.textContent = label;
+
+				const width = Math.max(0, Math.min(100, overuse.utilization || 0));
+				this.overuseBarFill.style.width = `${width}%`;
+				this.overuseBarFill.classList.toggle('cc-warn', width >= 90);
+				this.overuseBarFill.classList.toggle('cc-full', width >= 99.5);
 			}
 
 			this._updateMarkers();
@@ -513,15 +641,20 @@
 		_updateMarkers() {
 			const now = Date.now();
 
-			if (this.sessionMarker && this.sessionWindowStartMs && this.sessionResetMs) {
-				const total = this.sessionResetMs - this.sessionWindowStartMs;
-				const elapsed = Math.max(0, Math.min(total, now - this.sessionWindowStartMs));
-				const ratio = total > 0 ? elapsed / total : 0;
-				const pct = Math.max(0, Math.min(100, ratio * 100));
-				this.sessionMarker.classList.remove('cc-hidden');
-				this.sessionMarker.style.left = `${pct}%`;
-			} else if (this.sessionMarker) {
-				this.sessionMarker.classList.add('cc-hidden');
+			for (const m of (CC.MODELS || ['haiku', 'sonnet', 'opus'])) {
+				const mg = this.modelGroups?.[m];
+				if (!mg) continue;
+				const shouldShowMarker = this.isNewChat ? (m === 'sonnet') : (m === this.activeModel);
+				if (shouldShowMarker && mg.marker && mg.windowStartMs && mg.resetMs) {
+					const total = mg.resetMs - mg.windowStartMs;
+					const elapsed = Math.max(0, Math.min(total, now - mg.windowStartMs));
+					const ratio = total > 0 ? elapsed / total : 0;
+					const pct = Math.max(0, Math.min(100, ratio * 100));
+					mg.marker.classList.remove('cc-hidden');
+					mg.marker.style.left = `${pct}%`;
+				} else if (mg.marker) {
+					mg.marker.classList.add('cc-hidden');
+				}
 			}
 
 			if (this.weeklyMarker && this.weeklyWindowStartMs && this.weeklyResetMs) {
@@ -552,12 +685,15 @@
 				this._renderHeader();
 			}
 
-			// Reset countdown text + time markers
-			if (this.sessionResetMs && this.sessionUsageSpan?.textContent) {
-				const idx = this.sessionUsageSpan.textContent.indexOf('· resets in');
-				if (idx !== -1) {
-					const prefix = this.sessionUsageSpan.textContent.slice(0, idx + '· resets in '.length);
-					this.sessionUsageSpan.textContent = `${prefix}${formatResetCountdown(this.sessionResetMs)}`;
+			// Reset countdown text
+			for (const m of (CC.MODELS || ['haiku', 'sonnet', 'opus'])) {
+				const mg = this.modelGroups?.[m];
+				if (mg?.resetMs && mg?.usageSpan?.textContent) {
+					const idx = mg.usageSpan.textContent.indexOf('· resets in');
+					if (idx !== -1) {
+						const prefix = mg.usageSpan.textContent.slice(0, idx + '· resets in '.length);
+						mg.usageSpan.textContent = `${prefix}${formatResetCountdown(mg.resetMs)}`;
+					}
 				}
 			}
 
@@ -566,6 +702,14 @@
 				if (idx !== -1) {
 					const prefix = this.weeklyUsageSpan.textContent.slice(0, idx + '· resets in '.length);
 					this.weeklyUsageSpan.textContent = `${prefix}${formatResetCountdown(this.weeklyResetMs)}`;
+				}
+			}
+
+			if (this.isNewChat && this.fiveHourResetMs && this.fiveHourIndicator?.textContent) {
+				const idx = this.fiveHourIndicator.textContent.indexOf('· resets in');
+				if (idx !== -1) {
+					const prefix = this.fiveHourIndicator.textContent.slice(0, idx + '· resets in '.length);
+					this.fiveHourIndicator.textContent = `${prefix}${formatResetCountdown(this.fiveHourResetMs)}`;
 				}
 			}
 
